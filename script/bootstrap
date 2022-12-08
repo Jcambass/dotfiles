@@ -12,6 +12,11 @@ fi
 cd "$(dirname "$0")/.."
 DOTFILES_ROOT=$(pwd -P)
 
+if ! [ -d $HOME/.dotfiles ]; then
+  echo "Linking dotfiles from $DOTFILES_ROOT to $HOME/.dotfiles"
+  ln -sf $DOTFILES_ROOT $HOME/.dotfiles
+fi
+
 set -e
 
 echo ''
@@ -62,6 +67,11 @@ link_file () {
 
   local overwrite= backup= skip=
   local action=
+
+  # Overwritte all files on codespaces or bp-dev
+  if [ -d /workspaces/.codespaces ] || $(hostname | grep bpdev); then
+    overwrite_all=true
+  fi
 
   if [ -f "$dst" -o -d "$dst" -o -L "$dst" ]
   then
@@ -137,7 +147,7 @@ install_dotfiles () {
   info 'installing dotfiles'
 
   local overwrite_all=false backup_all=false skip_all=false
-  
+
   if [ -n "${DOTFILES_OVERWRITE_CONFLICTS}" ]; then overwrite_all=true; fi
   if [ -n "${DOTFILES_BACKUP_CONFLICTS}" ]; then backup_all=true; fi
   if [ -n "${DOTFILES_SKIP_CONFLICTS}" ]; then skip_all=true; fi
