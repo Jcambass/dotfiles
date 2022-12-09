@@ -40,3 +40,8 @@
         #
         # Setting to git 2.0 default to suppress warning message
         default = simple
+[user]
+  name = Joel Ambass
+  email = Jcambass@users.noreply.github.com
+[github]
+  user = Jcambass
