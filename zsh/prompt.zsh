@@ -69,7 +69,7 @@ battery_status() {
 if test "$(uname)" = "Darwin"; then
   export PROMPT=$'\n$(battery_status)in $(directory_name) $(git_dirty)$(need_push)\n› '
 else
-  export PROMPT=$'\n$(directory_name) $(git_dirty)$(need_push)\n› '
+  export PROMPT=$'\n$(directory_name)\n› '
 fi
 
 set_prompt () {
