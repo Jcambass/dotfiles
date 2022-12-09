@@ -10,6 +10,7 @@
         s = status -sb
         cb = "!git checkout -b jcambass/$(date +'%Y-%m-%d')/$1 #"
         co = checkout
+	myb = "!git branch -a | grep jcambass"
         promote = !$ZSH/bin/git-promote
         wtf     = !$ZSH/bin/git-wtf
         rank-contributors = !$ZSH/bin/git-rank-contributors
