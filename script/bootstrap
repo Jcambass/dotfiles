@@ -69,7 +69,7 @@ link_file () {
   local action=
 
   # Overwritte all files on codespaces or bp-dev
-  if [ -d /workspaces/.codespaces ] || $(hostname | grep bpdev); then
+  if [ -d /workspaces/.codespaces ] || [ -n $(hostname | grep bpdev) ]; then
     overwrite_all=true
   fi
 
