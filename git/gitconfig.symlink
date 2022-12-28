@@ -46,3 +46,8 @@
   email = Jcambass@users.noreply.github.com
 [github]
   user = Jcambass
+[safe]
+	directory = /Users/jcambass/Documents/3-8-bugbash/actions-runner-osx-arm64-2.296.2/_work/jcambass-runner-previous-version-test/jcambass-runner-previous-version-test
+	directory = /Users/jcambass/Documents/3-8-bugbash/actions-runner-osx-arm64-2.296.2/_work/jcambass-runner-previous-version-test/jcambass-runner-previous-version-test
+	directory = /Users/jcambass/actions-runner/_work/test/test
+	directory = /Users/jcambass/actions-runner/_work/test/test
