@@ -1,6 +1,3 @@
-# shortcut to this dotfiles path is $BASH
-export BASH=$HOME/.dotfiles
-
 UNAME=`uname`
 
 if [ -x "$(command -v gdate)" ]; then
@@ -237,29 +234,4 @@ export EDITOR=vim
 # See https://vi.stackexchange.com/questions/16951/how-to-set-vims-background-based-on-terminals-background-colour
 export COLORFGBG="7;0"
 
-# all of our bash files
-typeset -U config_files
-config_files=($BASH/**/*.bash)
-
-# load the path files
-for file in ${(M)config_files:#*/path.bash}
-do
-  source $file
-done
-
-# load everything but the path and completion files
-for file in ${${config_files:#*/path.bash}:#*/completion.bash}
-do
-  source $file
-done
-
-# initialize autocomplete here, otherwise functions won't be loaded
-# TODO for bash!
-
-# load every completion after autocomplete loads
-for file in ${(M)config_files:#*/completion.bash}
-do
-  source $file
-done
-
-unset config_files
+source ~/.iterm2_shell_integration.bash
