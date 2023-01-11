@@ -233,3 +233,9 @@ export EDITOR=vim
 # My terminals tend to be dark. This variable is read by vim to change colors appropriately. This is set automatically on macos, but not in my bp-dev environments.
 # See https://vi.stackexchange.com/questions/16951/how-to-set-vims-background-based-on-terminals-background-colour
 export COLORFGBG="7;0"
+
+# init according to man page
+if command -v rbenv &> /dev/null
+then
+  eval "$(rbenv init -)"
+fi
