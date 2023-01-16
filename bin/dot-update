@@ -47,6 +47,7 @@ then
 
   # Install homebrew
   $DOTS/homebrew/install.sh 2>&1
+  eval "$(/opt/homebrew/bin/brew shellenv)"
 
   # Upgrade homebrew
   echo "› brew update"
