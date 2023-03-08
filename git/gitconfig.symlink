@@ -46,8 +46,3 @@
   email = Jcambass@users.noreply.github.com
 [github]
   user = Jcambass
-[safe]
-	directory = /Users/jcambass/actions-runner/_work/test/test
-	directory = /Users/jcambass/actions-runner/_work/test/test
-	directory = /Users/jcambass/actions-runner/_work/test/test
-	directory = /Users/jcambass/actions-runner/_work/test/test
