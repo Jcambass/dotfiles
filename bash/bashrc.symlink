@@ -234,4 +234,7 @@ export EDITOR=vim
 # See https://vi.stackexchange.com/questions/16951/how-to-set-vims-background-based-on-terminals-background-colour
 export COLORFGBG="7;0"
 
+if [[ -n "$CODESPACES" && "$GITHUB_REPOSITORY" == "github/github" ]]; then
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+fi
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash

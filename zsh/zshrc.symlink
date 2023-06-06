@@ -49,4 +49,8 @@ zle -N down-line-or-beginning-search
 bindkey "^[[A" up-line-or-beginning-search # Up
 bindkey "^[[B" down-line-or-beginning-search # Down
 
+if [[ -n "$CODESPACES" && "$GITHUB_REPOSITORY" == "github/github" ]]; then
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+fi
+
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
