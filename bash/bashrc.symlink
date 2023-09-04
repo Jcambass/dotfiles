@@ -230,6 +230,11 @@ fi
 # Use vim for `sudoedit`... see https://stackoverflow.com/questions/21488357/use-sudo-with-vimrc
 export EDITOR=vim
 
+# Secretive
+if [ "$UNAME" = "Darwin" ]; then
+  export SSH_AUTH_SOCK=/Users/jcambass/Library/Containers/com.maxgoedjen.Secretive.SecretAgent/Data/socket.ssh
+fi
+
 # My terminals tend to be dark. This variable is read by vim to change colors appropriately. This is set automatically on macos, but not in my bp-dev environments.
 # See https://vi.stackexchange.com/questions/16951/how-to-set-vims-background-based-on-terminals-background-colour
 export COLORFGBG="7;0"
