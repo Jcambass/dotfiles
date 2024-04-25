@@ -54,3 +54,4 @@ if [[ -n "$CODESPACES" && "$GITHUB_REPOSITORY" == "github/github" ]]; then
 fi
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+

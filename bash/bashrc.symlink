@@ -243,3 +243,4 @@ if [[ -n "$CODESPACES" && "$GITHUB_REPOSITORY" == "github/github" ]]; then
   eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
+. "$HOME/.cargo/env"
