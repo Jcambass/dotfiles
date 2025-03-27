@@ -47,3 +47,14 @@
   email = Jcambass@users.noreply.github.com
 [github]
   user = Jcambass
+[safe]
+	directory = /Users/jcambass/Desktop/runner test/_work/previous-runner-test/previous-runner-test
+	directory = /Users/jcambass/Desktop/runner test/_work/previous-runner-test/previous-runner-test
+	directory = /Users/jcambass/Desktop/runner test/_work/previous-runner-test/previous-runner-test
+	directory = /Users/jcambass/Desktop/runner test/_work/previous-runner-test/previous-runner-test
+	directory = /Users/jcambass/Desktop/runner test/_work/previous-runner-test/previous-runner-test
+	directory = /Users/jcambass/Desktop/runner test/_work/previous-runner-test/previous-runner-test
+	directory = /Users/jcambass/Desktop/runner-test/_work/previous-runner-test/previous-runner-test
+	directory = /Users/jcambass/Desktop/runner-test/_work/previous-runner-test/previous-runner-test
+[http]
+	postBuffer = 52428800

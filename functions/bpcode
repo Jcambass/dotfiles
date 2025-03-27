@@ -1,0 +1,7 @@
+#!/bin/sh
+#
+# Usage: bpcode <bp-dev-url>
+# Description: Opens VScode at the usual enterprise folder location
+bpcode () {
+  code --new-window --remote ssh-remote+build@"$1" /workspace/enterprise2
+}
