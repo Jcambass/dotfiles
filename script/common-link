@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+#
+# Inherits or removes a folder or file from the common folder into a system-specific folder.
+
+set -e
+
+add=false
+remove=false
+
+case $1 in
+  add)
+    echo "Linking $2 into $3"
+    add=true
+    ;;
+  remove)
+    echo "Removing $2 from $3"
+    remove=true
+    ;;
+  *)
+    echo "Usage: $0 {add|remove} git macos"
+    exit 1
+    ;;
+esac
+
+cd "$(dirname "$0")/.."
+DOTFILES_ROOT=$(pwd -P)
+
+src="$DOTFILES_ROOT/common/$2"
+dst="$DOTFILES_ROOT/$3/$2"
+
+if [ -f "$dst" ] ; then
+  echo "$dst exists as a file (not a symlink). Skipping."
+fi
+
+if [ -d "dst" ] ; then
+  echo "$dst exists as a directory (not a symlink). Skipping."
+fi
+
+if [ "$add" = true ] ; then
+  if [ -L "$dst" ] ; then
+    echo "$dst already exists as a symlink. Skipping."
+  else
+    ln -s "$src" "$dst"
+  fi
+fi
+
+if [ "$remove" = true ] ; then
+  if [ -L "$dst" ] ; then
+    rm "$dst"
+  else
+    echo "$dst does not exist. Skipping."
+  fi
+fi
+

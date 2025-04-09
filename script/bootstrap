@@ -2,13 +2,6 @@
 #
 # bootstrap installs things.
 
-if [ -n "${SHOULD_LOG_DOTFILES_SETUP}" ] && [ -z "${LOGGING_DOTFILES_SETUP:-}" ] ; then
-  echo "# $(date)" > "$HOME/.dotfiles-setup.log"
-  LOGGING_DOTFILES_SETUP=1 exec "$0" >> "$HOME/.dotfiles-setup.log" 2>&1
-fi
-
-#set -x
-
 cd "$(dirname "$0")/.."
 DOTFILES_ROOT=$(pwd -P)
 
@@ -18,8 +11,6 @@ if ! [ -d $HOME/.dotfiles ]; then
 fi
 
 set -e
-
-echo ''
 
 info () {
   printf "\r  [ \033[00;34m..\033[0m ] $1\n"
@@ -39,39 +30,11 @@ fail () {
   exit
 }
 
-setup_gitconfig () {
-  if ! [ -f git/gitconfig.local.symlink ]
-  then
-    info 'setup gitconfig'
-
-    git_credential='cache'
-    if [ "$(uname -s)" == "Darwin" ]
-    then
-      git_credential='osxkeychain'
-    fi
-
-    user ' - What is your github author name?'
-    read -e git_authorname
-    user ' - What is your github author email?'
-    read -e git_authoremail
-
-    sed -e "s/AUTHORNAME/$git_authorname/g" -e "s/AUTHOREMAIL/$git_authoremail/g" -e "s/GIT_CREDENTIAL_HELPER/$git_credential/g" git/gitconfig.local.symlink.example > git/gitconfig.local.symlink
-
-    success 'gitconfig'
-  fi
-}
-
-
 link_file () {
   local src=$1 dst=$2
 
   local overwrite= backup= skip=
   local action=
-
-  # Overwritte all files on codespaces or bp-dev
-  if [ -d /workspaces/.codespaces ] || [ -n $(hostname | grep bpdev) ]; then
-    overwrite_all=true
-  fi
 
   if [ -f "$dst" -o -d "$dst" -o -L "$dst" ]
   then
@@ -83,9 +46,7 @@ link_file () {
 
       if [ "$currentSrc" == "$src" ]
       then
-
         skip=true;
-
       else
 
         user "File already exists: $dst ($(basename "$src")), what do you want to do?\n\
@@ -143,37 +104,42 @@ link_file () {
   fi
 }
 
-install_dotfiles () {
-  info 'installing dotfiles'
-
-  local overwrite_all=false backup_all=false skip_all=false
-
-  if [ -n "${DOTFILES_OVERWRITE_CONFLICTS}" ]; then overwrite_all=true; fi
-  if [ -n "${DOTFILES_BACKUP_CONFLICTS}" ]; then backup_all=true; fi
-  if [ -n "${DOTFILES_SKIP_CONFLICTS}" ]; then skip_all=true; fi
-
-  for src in $(find -H "$DOTFILES_ROOT" -maxdepth 2 -name '*.symlink' -not -path '*.git*')
-  do
-    dst="$HOME/.$(basename "${src%.*}")"
-    if [ -f "$dst" ] && [[ "$dst" == "$HOME/.gitconfig" ]] && [[ $(($(grep "^\\[" $HOME/.gitconfig | wc -l))) == 2 ]]; then
-      # Handle gitconfig.symlink specially for bp-dev which has already populated it with my user/email.
-      cat "$src" >> "$dst"
-    else
-      link_file "$src" "$dst"
-    fi
-  done
-}
-
-#setup_gitconfig # Not needed for bp-dev, and the interactivity makes the bootstrap never complete when bp-dev runs it
-install_dotfiles
-
-info "installing dependencies"
-if source bin/dot-update | while read -r data; do info "$data"; done
-then
-  success "dependencies installed"
-else
-  fail "error installing dependencies"
+# Check which system we are on
+if [ "$(uname -s)" == "Darwin" ]; then
+  SYSTEM_TYPE="macos"
 fi
 
-echo ''
-echo '  All installed!'
+if [ "$CODESPACES" ]; then
+  SYSTEM_TYPE="codespaces"
+fi
+
+if hostname | grep -q "bpdev-us-east-1.github.net"; then
+  SYSTEM_TYPE="bpdev"
+fi
+
+# Default values for the conflict resolution
+overwrite_all=false backup_all=false skip_all=false
+
+if [ -n "${DOTFILES_OVERWRITE_CONFLICTS}" ]; then overwrite_all=true; fi
+if [ -n "${DOTFILES_BACKUP_CONFLICTS}" ]; then backup_all=true; fi
+if [ -n "${DOTFILES_SKIP_CONFLICTS}" ]; then skip_all=true; fi
+
+# Link all the files that should go into our home directory
+for src in $(find -H -L "$DOTFILES_ROOT/${SYSTEM_TYPE}" -maxdepth 2 -name '*.symlink')
+do
+  dst="$HOME/.$(basename "${src%.*}")"
+  link_file "$src" "$dst"
+done
+
+# Perform all install scripts
+for src in $(find -H -L "$DOTFILES_ROOT/${SYSTEM_TYPE}" -maxdepth 2 -name '*.install')
+do
+  source "$src"
+done
+
+# TODO: This needs to happen in the bash/zsh profile. Not here as this is only done once.
+# Apply all our changes to environment variables
+for src in $(find -H -L "$DOTFILES_ROOT/${SYSTEM_TYPE}" -maxdepth 2 -name '*.env')
+do
+  source "$src"
+done

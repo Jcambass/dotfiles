@@ -1,0 +1,3 @@
+. $HOME/.asdf/asdf.sh
+
+
