@@ -1,3 +1,6 @@
+# TODO: Think about splitting this into .zshenv, .zprofile and .zshrc to prevent being loaded twice and ensure things are available in nom interactive shell and scripts when needed.
+
+
 DOTFILES_ROOT=$HOME/.dotfiles
 DOTFILE_SYSTEM_TYPE=$(cat $DOTFILES_ROOT/.system)
 
