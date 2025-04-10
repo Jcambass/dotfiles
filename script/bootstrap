@@ -106,40 +106,40 @@ link_file () {
 
 # Check which system we are on
 if [ "$(uname -s)" == "Darwin" ]; then
-  SYSTEM_TYPE="macos"
+  DOTFILE_SYSTEM_TYPE="macos"
 fi
 
 if [ "$CODESPACES" ]; then
-  SYSTEM_TYPE="codespaces"
+  DOTFILE_SYSTEM_TYPE="codespaces"
 fi
 
 if hostname | grep -q "bpdev-us-east-1.github.net"; then
-  SYSTEM_TYPE="bpdev"
+  DOTFILE_SYSTEM_TYPE="bpdev"
 fi
+
+# write out the system type to a file
+echo $DOTFILE_SYSTEM_TYPE > $DOTFILES_ROOT/.system
 
 # Default values for the conflict resolution
 overwrite_all=false backup_all=false skip_all=false
+
+# Override the files if we're on a non interactive system.
+if [ $DOTFILE_SYSTEM_TYPE = "codespaces" ]; then overwrite_all=true; fi
+if [ $DOTFILE_SYSTEM_TYPE = "bpdev" ]; then overwrite_all=true; fi
 
 if [ -n "${DOTFILES_OVERWRITE_CONFLICTS}" ]; then overwrite_all=true; fi
 if [ -n "${DOTFILES_BACKUP_CONFLICTS}" ]; then backup_all=true; fi
 if [ -n "${DOTFILES_SKIP_CONFLICTS}" ]; then skip_all=true; fi
 
 # Link all the files that should go into our home directory
-for src in $(find -H -L "$DOTFILES_ROOT/${SYSTEM_TYPE}" -maxdepth 2 -name '*.symlink')
+for src in $(find -H -L "$DOTFILES_ROOT/${DOTFILE_SYSTEM_TYPE}" -maxdepth 2 -name '*.symlink')
 do
   dst="$HOME/.$(basename "${src%.*}")"
   link_file "$src" "$dst"
 done
 
 # Perform all install scripts
-for src in $(find -H -L "$DOTFILES_ROOT/${SYSTEM_TYPE}" -maxdepth 2 -name '*.install')
-do
-  source "$src"
-done
-
-# TODO: This needs to happen in the bash/zsh profile. Not here as this is only done once.
-# Apply all our changes to environment variables
-for src in $(find -H -L "$DOTFILES_ROOT/${SYSTEM_TYPE}" -maxdepth 2 -name '*.env')
+for src in $(find -H -L "$DOTFILES_ROOT/${DOTFILE_SYSTEM_TYPE}" -maxdepth 2 -name '*.install')
 do
   source "$src"
 done

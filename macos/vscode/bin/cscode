@@ -2,6 +2,5 @@
 #
 # Usage: cscode
 # Description: Opens an interactive prompt to open a codespace in VScode Insider
-cscode () {
-  gh cs code --insiders
-}
+
+gh cs code --insiders

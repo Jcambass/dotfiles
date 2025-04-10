@@ -54,6 +54,7 @@ directory_name() {
   echo "%{$fg_bold[cyan]%}%1/%\/%{$reset_color%}"
 }
 
+# TODO: Move this into a separate file in the macos folder.
 if test "$(uname)" = "Darwin"; then
   export PROMPT=$'\n$(directory_name) $(git_dirty)$(need_push)\n› '
 else

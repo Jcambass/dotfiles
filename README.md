@@ -27,23 +27,48 @@ above and see what components may mesh up with you.
 [Fork it](https://github.com/holman/dotfiles/fork), remove what you don't
 use, and build on what you do use.
 
+## per system setup
+
+These dotfiles are split based on three different machine types I use:
+- `macos` for my personal MacBook Pro
+- `codespaces` for my GitHub Codespaces
+- `bpdev` for bpdev machines
+
+Each of these machine types has a directory in the root of the dotfiles.
+We always only operate on the directory for the machine type we are currently
+on. This is determined by the `DOTFILES_MACHINE_TYPE` environment variable.
+
+In addition to the machine type, there is a `common` directory that contains files that are shared between at least two of the machine types.
+
+The `script/common-link` script can be used to add and remove topic directories from the `common` directory to the machine type directories. This is done via symlinks so that changes to the shared files are automatically reflected in all machine types. The symlinked folders will be prefixed with `common-` in the machine type directories. This allows us to easily see what is shared and what is not but also allows us to have a machine type specific folder with the same name as a common folder.
+
 ## components
 
-There's a few special files in the hierarchy.
+Each system specific directory, including `common` can the following type of components:
 
-- **bin/**: Anything in `bin/` will get added to your `$PATH` and be made
-  available everywhere.
-- **topic/\*.zsh**: Any files ending in `.zsh` get loaded into your
-  environment.
-- **topic/path.zsh**: Any file named `path.zsh` is loaded first and is
-  expected to setup `$PATH` or similar.
-- **topic/completion.zsh**: Any file named `completion.zsh` is loaded
-  last and is expected to setup autocomplete.
 - **topic/install.sh**: Any file named `install.sh` is executed when you run `script/install`. To avoid being loaded automatically, its extension is `.sh`, not `.zsh`.
 - **topic/\*.symlink**: Any file ending in `*.symlink` gets symlinked into
   your `$HOME`. This is so you can keep all of those versioned in your dotfiles
   but still keep those autoloaded files in your home directory. These get
   symlinked in when you run `script/bootstrap`.
+- **topic/bin/**: Anything in `bin/` will get added to your `$PATH` and be made
+  available everywhere.
+- **topic/\*.env**: Any file ending in `.env` is loaded first and is
+  expected to setup `$PATH` or similar environment variables.
+
+Some files are depending on the shell being used.
+
+For `zsh`:
+- **topic/\*.zsh**: Any files ending in `.zsh` get loaded into your
+  environment.
+- **topic/completion.zsh**: Any file named `completion.zsh` is loaded
+  last and is expected to setup autocomplete.
+
+For `bash`:
+- **topic/\*.bash**: Any files ending in `.bash` get loaded into your
+  environment.
+
+Files (except for `bin` files) can also be placed in the system specific directory directly. This should be used sparingly and only for simple files that are self describing.
 
 ## install
 

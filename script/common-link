@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Inherits or removes a folder or file from the common folder into a system-specific folder.
+# Inherits or removes a folder from the common folder into a system-specific folder.
 
 set -e
 
@@ -26,7 +26,12 @@ cd "$(dirname "$0")/.."
 DOTFILES_ROOT=$(pwd -P)
 
 src="$DOTFILES_ROOT/common/$2"
-dst="$DOTFILES_ROOT/$3/$2"
+dst="$DOTFILES_ROOT/$3/common-$2"
+
+if [ ! -d "$src" ] ; then
+  echo "$src is not a directory or does not exist. Exiting."
+  exit 1
+fi
 
 if [ -f "$dst" ] ; then
   echo "$dst exists as a file (not a symlink). Skipping."

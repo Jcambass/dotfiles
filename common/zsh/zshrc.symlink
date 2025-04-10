@@ -1,7 +1,7 @@
-# shortcut to this dotfiles path is $ZSH
-export ZSH=$HOME/.dotfiles
+DOTFILES_ROOT=$HOME/.dotfiles
+DOTFILE_SYSTEM_TYPE=$(cat $DOTFILES_ROOT/.system)
 
-# TODO: ADJUST THIS TO ONLY LOOK INTO THE SYSTEM SPECIFIC FOLDER.
+export SYSTEM_SPECIFIC_DOTFILES=$DOTFILES_ROOT/$DOTFILE_SYSTEM_TYPE
 
 # Stash your environment variables in ~/.localrc. This means they'll stay out
 # of your main dotfiles repository (which may be public, like this one), but
@@ -13,18 +13,24 @@ fi
 
 # all of our zsh files
 typeset -U config_files
-config_files=($ZSH/**/*.zsh)
+config_files=($SYSTEM_SPECIFIC_DOTFILES/**/*.zsh)
 
-# load the path files
-for file in ${(M)config_files:#*/path.zsh}
+# load the env/path files
+for file in ${(M)config_files:#*/*.env}
 do
   source $file
 done
 
-# load everything but the path and completion files
-for file in ${${config_files:#*/path.zsh}:#*/completion.zsh}
+# load everything but the env/path and completion files
+for file in ${${config_files:#*/*.env}:#*/completion.zsh}
 do
   source $file
+done
+
+# Append all folders called bin that are in the SYSTEM_SPECIFIC_DOTFILES or any of its subfolders to the $PATH
+for bin in $(find $SYSTEM_SPECIFIC_DOTFILES -type d -name bin)
+do
+  export PATH=$PATH:$bin
 done
 
 # initialize autocomplete here, otherwise functions won't be loaded
@@ -39,24 +45,3 @@ done
 
 unset config_files
 
-# Better history
-# Credits to https://coderwall.com/p/jpj_6q/zsh-better-history-searching-with-arrow-keys
-autoload -U up-line-or-beginning-search
-autoload -U down-line-or-beginning-search
-zle -N up-line-or-beginning-search
-zle -N down-line-or-beginning-search
-bindkey "^[[A" up-line-or-beginning-search # Up
-bindkey "^[[B" down-line-or-beginning-search # Down
-
-if [[ -n "$CODESPACES" && "$GITHUB_REPOSITORY" == "github/github" ]]; then
-  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-fi
-
-[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
-
-#THIS MUST BE AT THE END OF THE FILE FOR SDKMAN TO WORK!!!
-export SDKMAN_DIR="$HOME/.sdkman"
-[[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]] && source "$HOME/.sdkman/bin/sdkman-init.sh"
-
-# Created by `pipx` on 2025-01-27 09:29:19
-export PATH="$PATH:/Users/jcambass/.local/bin"
