@@ -1,41 +1,12 @@
-# TODO: Think about splitting this into .zshenv, .zprofile and .zshrc to prevent being loaded twice and ensure things are available in nom interactive shell and scripts when needed.
-
-
-DOTFILES_ROOT=$HOME/.dotfiles
-DOTFILE_SYSTEM_TYPE=$(cat $DOTFILES_ROOT/.system)
-
-export SYSTEM_SPECIFIC_DOTFILES=$DOTFILES_ROOT/$DOTFILE_SYSTEM_TYPE
-
-# Stash your environment variables in ~/.localrc. This means they'll stay out
-# of your main dotfiles repository (which may be public, like this one), but
-# you'll have access to them in your scripts.
-if [[ -a ~/.localrc ]]
-then
-  source ~/.localrc
-fi
-
-
-# all of our .zsh or .env files
+# all of our .zsh files without any .env files as they are loaded in the zshenv file already.
 typeset -U config_files
 # Important to use `***` instead of `**` to ensure we follow symlinks like the ones pointing to entries in the `common` folder.
-config_files=($SYSTEM_SPECIFIC_DOTFILES/***/*.{zsh,env})
+config_files=($SYSTEM_SPECIFIC_DOTFILES/***/*.zsh)
 
-# load the env files
-for file in ${(M)config_files:#*/*.env}
+# load everything but completion files
+for file in ${config_files:#*/completion.zsh}
 do
   source $file
-done
-
-# load everything but the env and completion files
-for file in ${${config_files:#*/*.env}:#*/completion.zsh}
-do
-  source $file
-done
-
-# Append all folders called bin that are in the SYSTEM_SPECIFIC_DOTFILES or any of its subfolders to the $PATH
-for bin in $(find $SYSTEM_SPECIFIC_DOTFILES -type d -name bin)
-do
-  export PATH=$PATH:$bin
 done
 
 # initialize autocomplete here, otherwise functions won't be loaded

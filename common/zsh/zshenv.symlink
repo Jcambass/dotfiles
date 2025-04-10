@@ -1,0 +1,31 @@
+
+DOTFILES_ROOT=$HOME/.dotfiles
+DOTFILE_SYSTEM_TYPE=$(cat $DOTFILES_ROOT/.system)
+
+export SYSTEM_SPECIFIC_DOTFILES=$DOTFILES_ROOT/$DOTFILE_SYSTEM_TYPE
+
+# Stash your environment variables in ~/.localrc. This means they'll stay out
+# of your main dotfiles repository (which may be public, like this one), but
+# you'll have access to them in your scripts.
+if [[ -a ~/.localrc ]]
+then
+  source ~/.localrc
+fi
+
+
+# all of our .env files
+typeset -U env_files
+# Important to use `***` instead of `**` to ensure we follow symlinks like the ones pointing to entries in the `common` folder.
+env_files=($SYSTEM_SPECIFIC_DOTFILES/***/*.env)
+
+# load the env files
+for file in $env_files
+do
+  source $file
+done
+
+# Append all folders called bin that are in the SYSTEM_SPECIFIC_DOTFILES or any of its subfolders to the $PATH
+for bin in $(find $SYSTEM_SPECIFIC_DOTFILES -type d -name bin)
+do
+  export PATH=$PATH:$bin
+done
