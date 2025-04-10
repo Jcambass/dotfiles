@@ -11,17 +11,19 @@ then
   source ~/.localrc
 fi
 
-# all of our zsh files
-typeset -U config_files
-config_files=($SYSTEM_SPECIFIC_DOTFILES/**/*.zsh)
 
-# load the env/path files
+# all of our .zsh or .env files
+typeset -U config_files
+# Important to use `***` instead of `**` to ensure we follow symlinks like the ones pointing to entries in the `common` folder.
+config_files=($SYSTEM_SPECIFIC_DOTFILES/***/*.{zsh,env})
+
+# load the env files
 for file in ${(M)config_files:#*/*.env}
 do
   source $file
 done
 
-# load everything but the env/path and completion files
+# load everything but the env and completion files
 for file in ${${config_files:#*/*.env}:#*/completion.zsh}
 do
   source $file
