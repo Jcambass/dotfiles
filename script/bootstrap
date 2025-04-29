@@ -132,14 +132,24 @@ if [ -n "${DOTFILES_BACKUP_CONFLICTS}" ]; then backup_all=true; fi
 if [ -n "${DOTFILES_SKIP_CONFLICTS}" ]; then skip_all=true; fi
 
 # Link all the files that should go into our home directory
-for src in $(find -H -L "$DOTFILES_ROOT/${DOTFILE_SYSTEM_TYPE}" -maxdepth 2 -name '*.symlink')
-do
-  dst="$HOME/.$(basename "${src%.*}")"
-  link_file "$src" "$dst"
-done
+symlink_files=$(find -H -L "$DOTFILES_ROOT/${DOTFILE_SYSTEM_TYPE}" -maxdepth 2 -name '*.symlink')
+if [ -n "$symlink_files" ]; then
+  for src in $symlink_files
+  do
+    dst="$HOME/.$(basename "${src%.*}")"
+    link_file "$src" "$dst"
+  done
+else
+  info "No .symlink files found to link."
+fi
 
 # Perform all install scripts
-for src in $(find -H -L "$DOTFILES_ROOT/${DOTFILE_SYSTEM_TYPE}" -maxdepth 2 -name '*.install')
-do
-  source "$src"
-done
+install_files=$(find -H -L "$DOTFILES_ROOT/${DOTFILE_SYSTEM_TYPE}" -maxdepth 2 -name '*.install')
+if [ -n "$install_files" ]; then
+  for src in $install_files
+  do
+    source "$src"
+  done
+else
+  info "No .install files found to execute."
+fi
