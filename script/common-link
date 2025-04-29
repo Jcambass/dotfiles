@@ -22,11 +22,11 @@ case $1 in
     ;;
 esac
 
-cd "$(dirname "$0")/.."
-DOTFILES_ROOT=$(pwd -P)
+# Navigate to the destination parent folder as with relative symlinks both the src and target  need to be relative to the target folder.
+cd "$(dirname "$0")/../$3"
 
-src="$DOTFILES_ROOT/common/$2"
-dst="$DOTFILES_ROOT/$3/common-$2"
+src="../common/$2"
+dst="common-$2"
 
 if [ ! -d "$src" ] ; then
   echo "$src is not a directory or does not exist. Exiting."
