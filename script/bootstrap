@@ -10,7 +10,7 @@ if ! [ -d $HOME/.dotfiles ]; then
   ln -sf $DOTFILES_ROOT $HOME/.dotfiles
 fi
 
-set -e
+#set -e
 
 info () {
   printf "\r  [ \033[00;34m..\033[0m ] $1\n"
@@ -144,12 +144,12 @@ else
 fi
 
 # Perform all install scripts
-install_files=$(find -H -L "$DOTFILES_ROOT/${DOTFILE_SYSTEM_TYPE}" -maxdepth 2 -name '*.install')
+install_files=$(find -H -L "$DOTFILES_ROOT/${DOTFILE_SYSTEM_TYPE}" -maxdepth 2 -name 'install.sh')
 if [ -n "$install_files" ]; then
   for src in $install_files
   do
     source "$src"
   done
 else
-  info "No .install files found to execute."
+  info "No install.sh files found to execute."
 fi
