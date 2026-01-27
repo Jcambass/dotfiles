@@ -4,8 +4,10 @@
 [hub]
         protocol = https
 [alias]
+	cm = commit -m
         cma = commit --amend --no-edit
         d = diff
+	dc = diff --cached
         psu = push -u origin HEAD
         s = status -sb
         cb = "!git checkout -b jcambass/$(date +'%Y-%m-%d')/$1 #"
@@ -25,6 +27,7 @@
         commentchar = $
         excludesfile = ~/.gitignore
         editor = vim
+	pager = less -FX
 [apply]
         whitespace = nowarn
 [mergetool]
@@ -46,3 +49,8 @@
   user = Jcambass
 [http]
 	postBuffer = 52428800
+[filter "lfs"]
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process

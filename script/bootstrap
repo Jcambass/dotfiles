@@ -113,7 +113,13 @@ if [ "$CODESPACES" ]; then
   DOTFILE_SYSTEM_TYPE="codespaces"
 fi
 
+# Old bp-dev URLs
 if hostname | grep -q "bpdev-us-east-1.github.net"; then
+  DOTFILE_SYSTEM_TYPE="bpdev"
+fi
+
+# New bp-dev URLs
+if hostname | grep -q "jcambass-.*\.octoca\.ts\.net"; then
   DOTFILE_SYSTEM_TYPE="bpdev"
 fi
 

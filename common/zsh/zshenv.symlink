@@ -29,3 +29,4 @@ for bin in $(find $SYSTEM_SPECIFIC_DOTFILES -type d -name bin)
 do
   export PATH=$PATH:$bin
 done
+. "$HOME/.cargo/env"
