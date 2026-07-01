@@ -25,4 +25,9 @@ The image includes Go, Ruby, Python, Rust, and Docker. `docker-pi` starts a nest
 
 The sandbox mounts Pi configuration and `~/.gitconfig` read-only from the host, but keeps Pi state in the `pi-agent-home` Docker volume. Symlinked configuration paths are resolved before mounting. For directories that contain symlinked files, such as `~/.agents/skills`, `docker-pi` also mounts the symlink target repository read-only so those files are readable inside the container.
 
+Pi defaults to GitHub Copilot models, but model auth is still Pi state. On first
+use, run `pi`, type `/login`, choose GitHub Copilot, and leave the Enterprise
+domain blank unless you need one. That auth is stored in the `pi-agent-home`
+Docker volume.
+
 bpdev runs Pi natively and does not use this Docker sandbox.

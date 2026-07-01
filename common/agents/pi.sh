@@ -168,7 +168,7 @@ __pi_global_skills_are_project_skills() {
 #   PI_DOCKER_IMAGE         image tag                  (default: pi-sandbox)
 #   PI_DOCKERFILE           image Dockerfile            (default: .pi/sandbox/Dockerfile.pi next to .shellrc)
 #   PI_DOCKER_AGENT_VOLUME  named volume mounted at     (default: pi-agent-home)
-#                           /root/.pi/agent (container-local auth + sessions;
+#                           /root/.pi/agent (container-local Pi auth + sessions;
 #                           run `/login` once on first use)
 #   PI_DOCKER_IN_DOCKER    start Docker inside sandbox   (default: 1; set 0 to disable)
 #   PI_DOCKER_LIB_VOLUME   named volume for inner Docker (default: pi-docker-lib)
@@ -178,8 +178,9 @@ __pi_global_skills_are_project_skills() {
 # sessions/, and trust.json
 # stay in the container-local named volume.
 # Set PI_NO_TMUX=1 to run pi directly in the container (no tmux/status panel).
-# GitHub auth stays container-local too: run `gh auth login` once inside
-# docker-pi. Other secrets still need a *.local override.
+# Git credentials stay container-local too: run `gh auth login` inside
+# docker-pi if Git operations need GitHub auth. For Pi model auth, run `/login`
+# inside Pi and choose GitHub Copilot.
 docker-pi() {
   local docker_pi_version="2026-06-29.2"
   local image="${PI_DOCKER_IMAGE:-pi-sandbox}"
