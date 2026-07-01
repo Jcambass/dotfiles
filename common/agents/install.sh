@@ -245,6 +245,122 @@ _agents_ensure_gh() {
     || _agents_warn "GitHub CLI install failed; continuing"
 }
 
+_agents_gh_data_dir() {
+  if [ -n "${XDG_DATA_HOME:-}" ]; then
+    printf '%s\n' "$XDG_DATA_HOME/gh"
+    return
+  fi
+
+  printf '%s\n' "$HOME/.local/share/gh"
+}
+
+_agents_gh_slack_source_dir() {
+  printf '%s\n' "$(_agents_gh_data_dir)/extension-src/gh-slack"
+}
+
+_agents_can_install_gh_slack_release() {
+  case "$(uname -s)/$(uname -m)" in
+    Darwin/*|Linux/x86_64|Linux/amd64) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+_agents_install_gh_slack_from_source() {
+  local src_dir src_parent tag commit version ldflags
+
+  if ! command -v git >/dev/null 2>&1; then
+    _agents_warn "git unavailable; skipping gh-slack source build"
+    return 0
+  fi
+
+  if ! command -v go >/dev/null 2>&1; then
+    _agents_warn "go unavailable; skipping gh-slack source build"
+    return 0
+  fi
+
+  src_dir="$(_agents_gh_slack_source_dir)"
+  src_parent="$(dirname "$src_dir")"
+  mkdir -p "$src_parent" || {
+    _agents_warn "could not create $src_parent; skipping gh-slack source build"
+    return 0
+  }
+
+  tag="$(gh release view --repo rneatherway/gh-slack --json tagName --jq .tagName 2>/dev/null || true)"
+  if [ -z "$tag" ]; then
+    tag="main"
+  fi
+
+  if [ -d "$src_dir/.git" ]; then
+    _agents_log "updating gh-slack source"
+    git -C "$src_dir" fetch --tags --force --prune origin || {
+      _agents_warn "gh-slack source update failed; continuing with existing checkout"
+    }
+  elif [ -e "$src_dir" ]; then
+    _agents_warn "$src_dir exists but is not a git checkout; skipping gh-slack source build"
+    return 0
+  else
+    _agents_log "cloning gh-slack source"
+    gh repo clone rneatherway/gh-slack "$src_dir" -- --depth 1 || {
+      _agents_warn "gh-slack source clone failed; continuing"
+      return 0
+    }
+  fi
+
+  if [ "$tag" = "main" ]; then
+    git -C "$src_dir" checkout main >/dev/null 2>&1 \
+      || _agents_warn "could not check out gh-slack main; continuing with current checkout"
+    git -C "$src_dir" pull --ff-only >/dev/null 2>&1 \
+      || _agents_warn "could not fast-forward gh-slack source; continuing with current checkout"
+  else
+    git -C "$src_dir" checkout --detach "$tag" >/dev/null 2>&1 \
+      || _agents_warn "could not check out gh-slack $tag; continuing with current checkout"
+  fi
+
+  commit="$(git -C "$src_dir" rev-parse --short HEAD 2>/dev/null || true)"
+  version="$tag"
+  ldflags="-X github.com/rneatherway/gh-slack/internal/version.version=$version -X github.com/rneatherway/gh-slack/internal/version.commit=$commit"
+
+  _agents_log "building gh-slack from source"
+  (cd "$src_dir" && go build -ldflags "$ldflags" -o gh-slack ./cmd/gh-slack) || {
+    _agents_warn "gh-slack source build failed; continuing"
+    return 0
+  }
+  chmod +x "$src_dir/gh-slack" || true
+
+  _agents_log "installing gh-slack extension from local source"
+  (cd "$src_dir" && gh extension install . --force) \
+    || _agents_warn "gh-slack local extension install failed; continuing"
+}
+
+_agents_ensure_gh_slack() {
+  if [ -n "${DOTFILES_SKIP_AGENT_INSTALL:-}" ]; then
+    return 0
+  fi
+
+  if ! _agents_is_agent_host; then
+    return 0
+  fi
+
+  if ! command -v gh >/dev/null 2>&1; then
+    _agents_warn "gh unavailable; skipping gh-slack extension install"
+    return 0
+  fi
+
+  if gh slack --help >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if _agents_can_install_gh_slack_release; then
+    _agents_log "installing gh-slack extension"
+    gh extension install https://github.com/rneatherway/gh-slack && return 0
+    _agents_warn "gh-slack extension install failed; falling back to source build"
+  else
+    _agents_log "building gh-slack extension from source for $(uname -s)/$(uname -m)"
+  fi
+
+  _agents_install_gh_slack_from_source
+}
+
 _agents_pup_release_version() {
   if command -v gh >/dev/null 2>&1; then
     gh release view --repo DataDog/pup --json tagName --jq .tagName 2>/dev/null | sed 's/^v//'
@@ -585,6 +701,7 @@ _agents_main() {
   _agents_link_pi_agent "$root" || failures=$((failures + 1))
   _agents_link_opencode_config "$root" || failures=$((failures + 1))
   _agents_ensure_agent_tools || failures=$((failures + 1))
+  _agents_ensure_gh_slack || failures=$((failures + 1))
   _agents_install_or_update_opencode || failures=$((failures + 1))
   _agents_install_or_update_pi || failures=$((failures + 1))
   _agents_install_or_update_workiq || failures=$((failures + 1))
