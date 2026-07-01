@@ -79,6 +79,7 @@ _agents_can_brew() {
 
 _agents_ensure_homebrew() {
   if _agents_can_brew; then
+    _agents_trust_homebrew_taps
     return 0
   fi
 
@@ -100,7 +101,25 @@ _agents_ensure_homebrew() {
     eval "$(/usr/local/bin/brew shellenv)"
   fi
 
-  _agents_can_brew
+  _agents_can_brew && _agents_trust_homebrew_taps
+}
+
+_agents_trust_homebrew_taps() {
+  local tap
+
+  if [ -n "${DOTFILES_SKIP_HOMEBREW_TRUST:-}" ]; then
+    return 0
+  fi
+
+  if ! _agents_can_brew || ! brew trust --help >/dev/null 2>&1; then
+    return 0
+  fi
+
+  for tap in github/bootstrap jcambass/tailhopper jcambass/tap manaflow-ai/cmux; do
+    if brew tap | grep -qx "$tap"; then
+      brew trust "$tap" >/dev/null 2>&1 || _agents_warn "could not trust Homebrew tap $tap; continuing"
+    fi
+  done
 }
 
 _agents_brew_install() {
@@ -144,6 +163,7 @@ _agents_ensure_agent_tools() {
     if ! command -v cmux >/dev/null 2>&1 && _agents_ensure_homebrew; then
       _agents_log "installing cmux"
       brew tap manaflow-ai/cmux
+      _agents_trust_homebrew_taps
       brew install --cask cmux || _agents_warn "cmux install failed; continuing"
     fi
 
