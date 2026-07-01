@@ -1,0 +1,39 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "theme": "github",
+  "autoupdate": true,
+  "share": "disabled",
+  "instructions": [
+    "Never git push without explicit permission.",
+    "When looking up library, framework, or API documentation, prefer Context7 MCP tools when available.",
+    "When searching GitHub issues, pull requests, or code, prefer GitHub CLI or configured GitHub tools."
+  ],
+  "permission": {
+    "bash": {
+      "git push *": "ask"
+    }
+  },
+  "watcher": {
+    "ignore": [
+      "node_modules/**",
+      "dist/**",
+      ".git/**",
+      "**/*.log",
+      "*.sqlite",
+      "**/*.sqlite",
+      "**/*.sqlite*",
+      "*.sqlite3",
+      "**/*.sqlite3",
+      "**/*.sqlite3*",
+      "tmp/**",
+      "vendor/**/*"
+    ]
+  },
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true
+    }
+  }
+}

@@ -1,6 +1,6 @@
 export LSCOLORS="exfxcxdxbxegedabagacad"
 export CLICOLOR=true
-export LC_ALL=en_US.UTF-8
+export LC_ALL="${LC_ALL:-${LANG:-C.UTF-8}}"
 
 HISTFILE=~/.zsh_history
 HISTSIZE=10000
