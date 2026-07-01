@@ -10,100 +10,110 @@ if ! [ -d $HOME/.dotfiles ]; then
   ln -sf $DOTFILES_ROOT $HOME/.dotfiles
 fi
 
-#set -e
+bootstrap_warnings=()
+linked_count=0
+already_linked_count=0
+skipped_count=0
+overwritten_count=0
+backed_up_count=0
+install_count=0
 
-info () {
-  printf "\r  [ \033[00;34m..\033[0m ] $1\n"
+supports_color () {
+  [ -t 1 ] && [ -z "${NO_COLOR:-}" ]
 }
 
-user () {
-  printf "\r  [ \033[0;33m??\033[0m ] $1\n"
+supports_warning_color () {
+  [ -t 2 ] && [ -z "${NO_COLOR:-}" ]
+}
+
+info () {
+  printf "\r  [ \033[00;34m..\033[0m ] %s\n" "$1"
+}
+
+warn () {
+  local message="$1"
+  bootstrap_warnings+=("$message")
+
+  if supports_warning_color; then
+    printf "\r  [ \033[00;33mWARN\033[0m ] %s\n" "$message" >&2
+  else
+    printf "\r  [ WARN ] %s\n" "$message" >&2
+  fi
 }
 
 success () {
-  printf "\r\033[2K  [ \033[00;32mOK\033[0m ] $1\n"
+  printf "\r\033[2K  [ \033[00;32mOK\033[0m ] %s\n" "$1"
 }
 
 fail () {
-  printf "\r\033[2K  [\033[0;31mFAIL\033[0m] $1\n"
+  printf "\r\033[2K  [\033[0;31mFAIL\033[0m] %s\n" "$1"
   echo ''
   exit 1
+}
+
+print_summary () {
+  local warning
+
+  if supports_color; then
+    printf "\r  [ \033[00;34m..\033[0m ] bootstrap summary: %s linked, %s already linked, %s skipped, %s overwritten, %s backed up, %s install scripts\n" \
+      "$linked_count" "$already_linked_count" "$skipped_count" "$overwritten_count" "$backed_up_count" "$install_count"
+  else
+    printf "\r  [ .. ] bootstrap summary: %s linked, %s already linked, %s skipped, %s overwritten, %s backed up, %s install scripts\n" \
+      "$linked_count" "$already_linked_count" "$skipped_count" "$overwritten_count" "$backed_up_count" "$install_count"
+  fi
+
+  if [ "${#bootstrap_warnings[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  if supports_warning_color; then
+    printf "\r  [ \033[00;33mWARN\033[0m ] %s warning(s) during bootstrap:\n" "${#bootstrap_warnings[@]}" >&2
+  else
+    printf "\r  [ WARN ] %s warning(s) during bootstrap:\n" "${#bootstrap_warnings[@]}" >&2
+  fi
+
+  for warning in "${bootstrap_warnings[@]}"; do
+    printf "    - %s\n" "$warning" >&2
+  done
 }
 
 link_file () {
   local src=$1 dst=$2
 
-  local overwrite= backup= skip=
-  local action=
+  local currentSrc=
 
   if [ -f "$dst" -o -d "$dst" -o -L "$dst" ]
   then
+    currentSrc="$(readlink "$dst" 2>/dev/null || true)"
 
-    if [ "$overwrite_all" == "false" ] && [ "$backup_all" == "false" ] && [ "$skip_all" == "false" ]
+    if [ "$currentSrc" == "$src" ]
     then
-
-      local currentSrc="$(readlink "$dst")"
-
-      if [ "$currentSrc" == "$src" ]
-      then
-        skip=true;
-      else
-
-        user "File already exists: $dst ($(basename "$src")), what do you want to do?\n\
-        [s]kip, [S]kip all, [o]verwrite, [O]verwrite all, [b]ackup, [B]ackup all?\n\
-        Defaulting to [S]kip all if no response received within 30 seconds."
-        read -n 1 -t 30 action || { echo "No response received, skipping all"; skip_all=true; };
-
-        case "$action" in
-          o )
-            overwrite=true;;
-          O )
-            overwrite_all=true;;
-          b )
-            backup=true;;
-          B )
-            backup_all=true;;
-          s )
-            skip=true;;
-          S )
-            skip_all=true;;
-          * )
-            skip=true;;
-        esac
-
-      fi
-
+      already_linked_count=$((already_linked_count + 1))
+      return 0
     fi
 
-    overwrite=${overwrite:-$overwrite_all}
-    backup=${backup:-$backup_all}
-    skip=${skip:-$skip_all}
-
-    if [ "$overwrite" == "true" ]
+    if [ "$overwrite_all" == "true" ]
     then
       rm -rf "$dst"
+      overwritten_count=$((overwritten_count + 1))
       success "removed $dst"
-    fi
-
-    if [ "$backup" == "true" ]
+    elif [ "$backup_all" == "true" ]
     then
       mv "$dst" "${dst}.backup"
+      backed_up_count=$((backed_up_count + 1))
       success "moved $dst to ${dst}.backup"
-    fi
-
-    if [ "$skip" == "true" ]
-    then
-      success "skipped $src"
+    else
+      skipped_count=$((skipped_count + 1))
+      warn "skipped $dst; exists and is not linked to $src"
+      return 0
     fi
   fi
 
-  if [ "$skip" != "true" ]  # "false" or empty
-  then
-    if ln -s "$1" "$2"; then
-      success "linked $1 to $2"
-    else
-      fail "could not link $1 to $2"
-    fi
+  if ln -s "$1" "$2"; then
+    linked_count=$((linked_count + 1))
+    success "linked $1 to $2"
+  else
+    fail "could not link $1 to $2"
   fi
 }
 
@@ -140,16 +150,12 @@ fi
 # write out the system type to a file
 echo "$DOTFILE_SYSTEM_TYPE" > "$DOTFILES_ROOT/.system"
 
-# Default values for the conflict resolution
-overwrite_all=false backup_all=false skip_all=false
-
-# Override the files if we're on a non interactive system.
-if [ "$DOTFILE_SYSTEM_TYPE" = "codespaces" ]; then overwrite_all=true; fi
-if [ "$DOTFILE_SYSTEM_TYPE" = "bpdev" ]; then overwrite_all=true; fi
+# Default values for the conflict resolution. Bootstrap is non-interactive:
+# skip conflicts unless explicitly told to overwrite or back them up.
+overwrite_all=false backup_all=false
 
 if [ -n "${DOTFILES_OVERWRITE_CONFLICTS}" ]; then overwrite_all=true; fi
 if [ -n "${DOTFILES_BACKUP_CONFLICTS}" ]; then backup_all=true; fi
-if [ -n "${DOTFILES_SKIP_CONFLICTS}" ]; then skip_all=true; fi
 
 manifest_topic_dirs () {
   local topic
@@ -191,6 +197,7 @@ fi
 # Perform all install scripts
 if [ -n "${DOTFILES_SKIP_INSTALLS:-}" ]; then
   info "Skipping install.sh files because DOTFILES_SKIP_INSTALLS is set."
+  print_summary
   exit 0
 fi
 
@@ -202,6 +209,7 @@ do
   do
     installed_any=true
     if DOTFILES_ROOT="$DOTFILES_ROOT" DOTFILE_SYSTEM_TYPE="$DOTFILE_SYSTEM_TYPE" bash "$src"; then
+      install_count=$((install_count + 1))
       success "ran $src"
     else
       install_failures=$((install_failures + 1))
@@ -213,3 +221,5 @@ done < <(manifest_topic_dirs)
 if [ "$installed_any" = "false" ]; then
   info "No install.sh files found to execute."
 fi
+
+print_summary
