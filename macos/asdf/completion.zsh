@@ -1,5 +1,5 @@
-completion='${ASDF_DIR}/completions'
-if test -f $completion
+completion="${ASDF_DIR:-$HOME/.asdf}/completions"
+if test -f "$completion"
 then
-  source $completion
+  source "$completion"
 fi
