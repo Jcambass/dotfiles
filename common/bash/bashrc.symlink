@@ -2,6 +2,7 @@ DOTFILES_ROOT=$HOME/.dotfiles
 DOTFILE_SYSTEM_TYPE=$(cat $DOTFILES_ROOT/.system)
 
 export SYSTEM_SPECIFIC_DOTFILES=$DOTFILES_ROOT/$DOTFILE_SYSTEM_TYPE
+export DOTFILES_SYSTEM_MANIFEST=$DOTFILES_ROOT/systems/$DOTFILE_SYSTEM_TYPE
 
 # Stash your environment variables in ~/.localrc. This means they'll stay out
 # of your main dotfiles repository (which may be public, like this one), but
@@ -11,39 +12,53 @@ then
   source ~/.localrc
 fi
 
-# all of our .bash or .env files
-config_files=()
-while IFS= read -r -d '' file; do
-  config_files+=("$file")
-done < <(find -H -L "$SYSTEM_SPECIFIC_DOTFILES" -type f -name '*.bash' -print0)
-while IFS= read -r -d '' file; do
-  config_files+=("$file")
-done < <(find -H -L "$SYSTEM_SPECIFIC_DOTFILES" -type f -name '*.env' -print0)
+dotfiles_topic_dirs=()
+if [[ -r "$DOTFILES_SYSTEM_MANIFEST" ]]; then
+  while IFS= read -r topic || [[ -n "$topic" ]]; do
+    topic="${topic%%#*}"
+    topic="${topic#"${topic%%[![:space:]]*}"}"
+    topic="${topic%"${topic##*[![:space:]]}"}"
+
+    if [[ -n "$topic" && -d "$DOTFILES_ROOT/$topic" ]]; then
+      dotfiles_topic_dirs+=("$DOTFILES_ROOT/$topic")
+    fi
+  done < "$DOTFILES_SYSTEM_MANIFEST"
+fi
+
+bash_files=()
+env_files=()
+for topic_dir in "${dotfiles_topic_dirs[@]}"; do
+  while IFS= read -r -d '' file; do
+    bash_files+=("$file")
+  done < <(find -H "$topic_dir" -type f -name '*.bash' -print0)
+
+  while IFS= read -r -d '' file; do
+    env_files+=("$file")
+  done < <(find -H "$topic_dir" -type f -name '*.env' -print0)
+done
 
 # load the env/path files
-for file in "${config_files[@]}"; do
-  if [[ "$file" == */*.env ]]; then
-    source "$file"
-  fi
+for file in "${env_files[@]}"; do
+  source "$file"
 done
 
 # Check for any `completion.bash` files and warn the user as they are not supported.
-for file in "${config_files[@]}"; do
+for file in "${bash_files[@]}"; do
   if [[ "$file" == */completion.bash ]]; then
     echo "WARNING: $file will be loaded but might not work as expected. Completion files are supported yet in our bashrc."
   fi
 done
 
 # load everything but the env/path files
-for file in "${config_files[@]}"; do
-  if [[ "$file" != */*.env ]]; then
-    source "$file"
-  fi
+for file in "${bash_files[@]}"; do
+  source "$file"
 done
 
-# Append all folders called bin that are in the SYSTEM_SPECIFIC_DOTFILES or any of its subfolders to the $PATH
-while IFS= read -r -d '' bin; do
-  export PATH="$PATH:$bin"
-done < <(find "$SYSTEM_SPECIFIC_DOTFILES" -type d -name bin -print0)
+# Append all folders called bin that are in any manifest topic to the $PATH.
+for topic_dir in "${dotfiles_topic_dirs[@]}"; do
+  while IFS= read -r -d '' bin; do
+    export PATH="$PATH:$bin"
+  done < <(find "$topic_dir" -type d -name bin -print0)
+done
 
-unset config_files
+unset bash_files env_files dotfiles_topic_dirs topic topic_dir file bin

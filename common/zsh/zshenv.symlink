@@ -3,6 +3,7 @@ DOTFILES_ROOT=$HOME/.dotfiles
 DOTFILE_SYSTEM_TYPE=$(cat $DOTFILES_ROOT/.system)
 
 export SYSTEM_SPECIFIC_DOTFILES=$DOTFILES_ROOT/$DOTFILE_SYSTEM_TYPE
+export DOTFILES_SYSTEM_MANIFEST=$DOTFILES_ROOT/systems/$DOTFILE_SYSTEM_TYPE
 
 # Stash your environment variables in ~/.localrc. This means they'll stay out
 # of your main dotfiles repository (which may be public, like this one), but
@@ -13,20 +14,45 @@ then
 fi
 
 
+typeset -gaU DOTFILES_TOPIC_DIRS
+DOTFILES_TOPIC_DIRS=()
+if [[ -r "$DOTFILES_SYSTEM_MANIFEST" ]]; then
+  while IFS= read -r topic || [[ -n "$topic" ]]
+  do
+    topic="${topic%%#*}"
+    topic="${topic#"${topic%%[![:space:]]*}"}"
+    topic="${topic%"${topic##*[![:space:]]}"}"
+
+    if [[ -n "$topic" && -d "$DOTFILES_ROOT/$topic" ]]; then
+      DOTFILES_TOPIC_DIRS+=("$DOTFILES_ROOT/$topic")
+    fi
+  done < "$DOTFILES_SYSTEM_MANIFEST"
+fi
+
 # all of our .env files
 typeset -U env_files
-# Important to use `***` instead of `**` to ensure we follow symlinks like the ones pointing to entries in the `common` folder.
-env_files=($SYSTEM_SPECIFIC_DOTFILES/***/*.env)
+env_files=()
+for topic_dir in $DOTFILES_TOPIC_DIRS
+do
+  env_files+=($topic_dir/**/*.env(N))
+done
 
 # load the env files
 for file in $env_files
 do
-  source $file
+  source "$file"
 done
 
-# Append all folders called bin that are in the SYSTEM_SPECIFIC_DOTFILES or any of its subfolders to the $PATH
-for bin in $(find $SYSTEM_SPECIFIC_DOTFILES -type d -name bin)
+# Append all folders called bin that are in any manifest topic to the $PATH.
+for topic_dir in $DOTFILES_TOPIC_DIRS
 do
-  export PATH=$PATH:$bin
+  while IFS= read -r bin
+  do
+    export PATH="$PATH:$bin"
+  done < <(find "$topic_dir" -type d -name bin)
 done
-. "$HOME/.cargo/env"
+if [ -f "$HOME/.cargo/env" ]; then
+  . "$HOME/.cargo/env"
+fi
+
+unset env_files topic topic_dir file bin

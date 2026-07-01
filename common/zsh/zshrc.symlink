@@ -1,12 +1,33 @@
 # all of our .zsh files without any .env files as they are loaded in the zshenv file already.
 typeset -U config_files
-# Important to use `***` instead of `**` to ensure we follow symlinks like the ones pointing to entries in the `common` folder.
-config_files=($SYSTEM_SPECIFIC_DOTFILES/***/*.zsh)
+config_files=()
+
+if (( ${+DOTFILES_TOPIC_DIRS} == 0 )); then
+  typeset -gaU DOTFILES_TOPIC_DIRS
+  DOTFILES_TOPIC_DIRS=()
+  if [[ -r "$DOTFILES_SYSTEM_MANIFEST" ]]; then
+    while IFS= read -r topic || [[ -n "$topic" ]]
+    do
+      topic="${topic%%#*}"
+      topic="${topic#"${topic%%[![:space:]]*}"}"
+      topic="${topic%"${topic##*[![:space:]]}"}"
+
+      if [[ -n "$topic" && -d "$DOTFILES_ROOT/$topic" ]]; then
+        DOTFILES_TOPIC_DIRS+=("$DOTFILES_ROOT/$topic")
+      fi
+    done < "$DOTFILES_SYSTEM_MANIFEST"
+  fi
+fi
+
+for topic_dir in $DOTFILES_TOPIC_DIRS
+do
+  config_files+=($topic_dir/**/*.zsh(N))
+done
 
 # load everything but completion files
 for file in ${config_files:#*/completion.zsh}
 do
-  source $file
+  source "$file"
 done
 
 # initialize autocomplete here, otherwise functions won't be loaded
@@ -16,8 +37,7 @@ compinit
 # load every completion after autocomplete loads
 for file in ${(M)config_files:#*/completion.zsh}
 do
-  source $file
+  source "$file"
 done
 
-unset config_files
-
+unset config_files topic topic_dir file

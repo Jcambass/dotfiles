@@ -27,7 +27,7 @@ success () {
 fail () {
   printf "\r\033[2K  [\033[0;31mFAIL\033[0m] $1\n"
   echo ''
-  exit
+  exit 1
 }
 
 link_file () {
@@ -105,57 +105,108 @@ link_file () {
 }
 
 # Check which system we are on
-if [ "$(uname -s)" == "Darwin" ]; then
-  DOTFILE_SYSTEM_TYPE="macos"
-fi
+DOTFILE_SYSTEM_TYPE=${DOTFILE_SYSTEM_TYPE:-}
 
-if [ "$CODESPACES" ]; then
+if [ -z "$DOTFILE_SYSTEM_TYPE" ] && [ -n "${CODESPACES:-}" ]; then
   DOTFILE_SYSTEM_TYPE="codespaces"
 fi
 
+if [ -z "$DOTFILE_SYSTEM_TYPE" ] && [ "$(uname -s)" == "Darwin" ]; then
+  DOTFILE_SYSTEM_TYPE="macos"
+fi
+
 # Old bp-dev URLs
-if hostname | grep -q "bpdev-us-east-1.github.net"; then
+if [ -z "$DOTFILE_SYSTEM_TYPE" ] && hostname | grep -q "bpdev-us-east-1.github.net"; then
   DOTFILE_SYSTEM_TYPE="bpdev"
 fi
 
 # New bp-dev URLs
-if hostname | grep -q "jcambass-.*\.octoca\.ts\.net"; then
+if [ -z "$DOTFILE_SYSTEM_TYPE" ] && hostname | grep -q "jcambass-.*\.octoca\.ts\.net"; then
   DOTFILE_SYSTEM_TYPE="bpdev"
 fi
 
+if [ -z "$DOTFILE_SYSTEM_TYPE" ]; then
+  fail "Could not determine dotfile system type. Set DOTFILE_SYSTEM_TYPE to macos, codespaces, or bpdev."
+fi
+
+DOTFILES_SYSTEM_MANIFEST="$DOTFILES_ROOT/systems/$DOTFILE_SYSTEM_TYPE"
+if [ ! -f "$DOTFILES_SYSTEM_MANIFEST" ]; then
+  fail "Missing system manifest: $DOTFILES_SYSTEM_MANIFEST"
+fi
+
 # write out the system type to a file
-echo $DOTFILE_SYSTEM_TYPE > $DOTFILES_ROOT/.system
+echo "$DOTFILE_SYSTEM_TYPE" > "$DOTFILES_ROOT/.system"
 
 # Default values for the conflict resolution
 overwrite_all=false backup_all=false skip_all=false
 
 # Override the files if we're on a non interactive system.
-if [ $DOTFILE_SYSTEM_TYPE = "codespaces" ]; then overwrite_all=true; fi
-if [ $DOTFILE_SYSTEM_TYPE = "bpdev" ]; then overwrite_all=true; fi
+if [ "$DOTFILE_SYSTEM_TYPE" = "codespaces" ]; then overwrite_all=true; fi
+if [ "$DOTFILE_SYSTEM_TYPE" = "bpdev" ]; then overwrite_all=true; fi
 
 if [ -n "${DOTFILES_OVERWRITE_CONFLICTS}" ]; then overwrite_all=true; fi
 if [ -n "${DOTFILES_BACKUP_CONFLICTS}" ]; then backup_all=true; fi
 if [ -n "${DOTFILES_SKIP_CONFLICTS}" ]; then skip_all=true; fi
 
-# Link all the files that should go into our home directory
-symlink_files=$(find -H -L "$DOTFILES_ROOT/${DOTFILE_SYSTEM_TYPE}" -maxdepth 2 -name '*.symlink')
-if [ -n "$symlink_files" ]; then
-  for src in $symlink_files
+manifest_topic_dirs () {
+  local topic
+
+  while IFS= read -r topic || [ -n "$topic" ]
   do
+    topic="${topic%%#*}"
+    topic="${topic#"${topic%%[![:space:]]*}"}"
+    topic="${topic%"${topic##*[![:space:]]}"}"
+
+    if [ -z "$topic" ]; then
+      continue
+    fi
+
+    if [ ! -d "$DOTFILES_ROOT/$topic" ]; then
+      fail "Manifest topic does not exist: $topic"
+    fi
+
+    printf '%s\n' "$DOTFILES_ROOT/$topic"
+  done < "$DOTFILES_SYSTEM_MANIFEST"
+}
+
+# Link all the files that should go into our home directory
+linked_any=false
+while IFS= read -r topic_dir
+do
+  while IFS= read -r -d '' src
+  do
+    linked_any=true
     dst="$HOME/.$(basename "${src%.*}")"
     link_file "$src" "$dst"
-  done
-else
+  done < <(find -H "$topic_dir" -maxdepth 2 -name '*.symlink' -print0)
+done < <(manifest_topic_dirs)
+
+if [ "$linked_any" = "false" ]; then
   info "No .symlink files found to link."
 fi
 
 # Perform all install scripts
-install_files=$(find -H -L "$DOTFILES_ROOT/${DOTFILE_SYSTEM_TYPE}" -maxdepth 2 -name 'install.sh')
-if [ -n "$install_files" ]; then
-  for src in $install_files
+if [ -n "${DOTFILES_SKIP_INSTALLS:-}" ]; then
+  info "Skipping install.sh files because DOTFILES_SKIP_INSTALLS is set."
+  exit 0
+fi
+
+installed_any=false
+install_failures=0
+while IFS= read -r topic_dir
+do
+  while IFS= read -r -d '' src
   do
-    source "$src"
-  done
-else
+    installed_any=true
+    if DOTFILES_ROOT="$DOTFILES_ROOT" DOTFILE_SYSTEM_TYPE="$DOTFILE_SYSTEM_TYPE" bash "$src"; then
+      success "ran $src"
+    else
+      install_failures=$((install_failures + 1))
+      fail "install script failed: $src"
+    fi
+  done < <(find -H "$topic_dir" -maxdepth 2 -name 'install.sh' -print0)
+done < <(manifest_topic_dirs)
+
+if [ "$installed_any" = "false" ]; then
   info "No install.sh files found to execute."
 fi

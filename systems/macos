@@ -1,0 +1,14 @@
+common/agents
+common/bash
+common/git
+common/tmux
+common/vim
+common/zsh
+macos/homebrew
+macos/asdf
+macos/brew-git
+macos/go
+macos/playdate
+macos/system-defaults
+macos/vscode
+macos/bpdev

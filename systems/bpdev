@@ -1,0 +1,7 @@
+common/agents
+common/bash
+common/git
+common/tmux
+common/vim
+common/zsh
+bpdev/vscode-extensions

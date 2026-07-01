@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Inherits or removes a folder from the common folder into a system-specific folder.
+# Adds or removes a topic from a system manifest.
 
 set -e
 
@@ -9,7 +9,7 @@ remove=false
 
 case $1 in
   add)
-    echo "Linking $2 into $3"
+    echo "Adding $2 to $3"
     add=true
     ;;
   remove)
@@ -22,38 +22,39 @@ case $1 in
     ;;
 esac
 
-# Navigate to the destination parent folder as with relative symlinks both the src and target  need to be relative to the target folder.
-cd "$(dirname "$0")/../$3"
+cd "$(dirname "$0")/.."
 
-src="../common/$2"
-dst="common-$2"
+manifest="systems/$3"
+topic="$2"
+case "$topic" in
+  */*) ;;
+  *) topic="common/$topic" ;;
+esac
 
-if [ ! -d "$src" ] ; then
-  echo "$src is not a directory or does not exist. Exiting."
+if [ ! -f "$manifest" ] ; then
+  echo "$manifest does not exist. Exiting."
   exit 1
 fi
 
-if [ -f "$dst" ] ; then
-  echo "$dst exists as a file (not a symlink). Skipping."
-fi
-
-if [ -d "dst" ] ; then
-  echo "$dst exists as a directory (not a symlink). Skipping."
+if [ ! -d "$topic" ] ; then
+  echo "$topic is not a directory or does not exist. Exiting."
+  exit 1
 fi
 
 if [ "$add" = true ] ; then
-  if [ -L "$dst" ] ; then
-    echo "$dst already exists as a symlink. Skipping."
+  if grep -qxF "$topic" "$manifest" ; then
+    echo "$topic already exists in $manifest. Skipping."
   else
-    ln -s "$src" "$dst"
+    printf '%s\n' "$topic" >> "$manifest"
   fi
 fi
 
 if [ "$remove" = true ] ; then
-  if [ -L "$dst" ] ; then
-    rm "$dst"
+  if grep -qxF "$topic" "$manifest" ; then
+    tmp="$(mktemp)"
+    grep -vxF "$topic" "$manifest" > "$tmp" || true
+    mv "$tmp" "$manifest"
   else
-    echo "$dst does not exist. Skipping."
+    echo "$topic is not in $manifest. Skipping."
   fi
 fi
-
