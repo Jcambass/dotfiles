@@ -199,11 +199,6 @@ _agents_ensure_agent_tools() {
       brew install --cask cmux || _agents_warn "cmux install failed; continuing"
     fi
 
-    if ! command -v docker >/dev/null 2>&1 && _agents_ensure_homebrew; then
-      _agents_log "installing OrbStack"
-      brew install --cask orbstack || _agents_warn "OrbStack install failed; continuing"
-    fi
-
     return 0
   fi
 

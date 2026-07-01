@@ -62,11 +62,6 @@ if ! command -v ghostty >/dev/null 2>&1 \
   brew install --cask ghostty
 fi
 
-if ! command -v docker >/dev/null 2>&1 && command -v brew >/dev/null 2>&1; then
-  echo "  Installing OrbStack for docker-pi."
-  brew install --cask orbstack
-fi
-
 unset -f trust_homebrew_taps
 
 return 0 2>/dev/null || exit 0

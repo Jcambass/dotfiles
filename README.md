@@ -105,9 +105,9 @@ installs the core agent toolchain automatically with Homebrew on macOS and
 `sudo apt-get` on bpdev/Codespaces: `git`, `gh`, `jq`, `ripgrep`, `tmux`,
 Node.js/npm, Pi, OpenCode, WorkIQ, and `pup`. It also installs the `gh-slack`
 GitHub CLI extension for Slack thread capture, falling back to a local Go source
-build when upstream does not publish a matching binary. macOS also installs cmux,
-Ghostty, and OrbStack when they are missing. bpdev and Codespaces run Pi
-natively; macOS uses the Docker-backed `docker-pi` sandbox by default.
+build when upstream does not publish a matching binary. macOS also installs cmux
+and Ghostty when they are missing. Pi runs natively on macOS, bpdev, and
+Codespaces; interactive launches use a tmux session by default.
 
 Pi is configured to use GitHub Copilot models by default. The first time you run
 it, authenticate Pi itself:
@@ -117,9 +117,8 @@ it, authenticate Pi itself:
 ```
 
 Choose GitHub Copilot and leave the Enterprise domain blank unless you need one.
-On macOS, `docker-pi` stores that auth in the `pi-agent-home` Docker volume. On
-bpdev and Codespaces, Pi stores it in `~/.pi/agent/auth.json`. If Pi says `No
-API key found for github-copilot`, run `/login`.
+Pi stores that auth in `~/.pi/agent/auth.json`. If Pi says `No API key found for
+github-copilot`, run `/login`.
 
 The main file you'll want to change right off the bat is `zsh/zshrc.symlink`,
 which sets up a few paths that'll be different on your particular machine.
