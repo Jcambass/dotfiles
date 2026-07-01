@@ -69,6 +69,20 @@ script/bootstrap
 This will symlink the appropriate files in `.dotfiles` to your home directory.
 Everything is configured and tweaked within `~/.dotfiles`.
 
+Bootstrap is non-interactive. It skips conflicting files by default, prints
+warnings, and shows a summary at the end. To replace existing files with the
+managed dotfiles versions, run:
+
+```sh
+script/bootstrap --force
+```
+
+To preserve existing files as `*.backup` first, run:
+
+```sh
+script/bootstrap --backup
+```
+
 macOS, bpdev, and Codespaces also link the shared agent configuration:
 
 - `~/.agents` for global agent instructions and skills.
@@ -94,3 +108,8 @@ which sets up a few paths that'll be different on your particular machine.
 defaults, and so on. Tweak this script, and occasionally run `dot` from
 time to time to keep your environment fresh and up-to-date. You can find
 this script in `bin/`.
+
+## AI contributors
+
+Repository-specific instructions for AI agents live in `AGENTS.md`. Start there
+before changing the dotfiles layout, bootstrap behavior, or agent setup.

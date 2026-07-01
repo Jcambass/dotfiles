@@ -51,6 +51,20 @@ fail () {
   exit 1
 }
 
+usage () {
+  cat <<'USAGE'
+Usage: script/bootstrap [options]
+
+Options:
+  -f, --force      overwrite existing conflicting files
+      --backup     move existing conflicting files to *.backup
+      --no-install skip install.sh scripts
+  -h, --help       show this help
+
+By default, bootstrap never prompts and skips conflicting files.
+USAGE
+}
+
 print_summary () {
   local warning
 
@@ -76,6 +90,28 @@ print_summary () {
     printf "    - %s\n" "$warning" >&2
   done
 }
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -f|--force|--overwrite)
+      DOTFILES_OVERWRITE_CONFLICTS=1
+      ;;
+    --backup)
+      DOTFILES_BACKUP_CONFLICTS=1
+      ;;
+    --no-install|--skip-installs)
+      DOTFILES_SKIP_INSTALLS=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fail "Unknown option: $1"
+      ;;
+  esac
+  shift
+done
 
 link_file () {
   local src=$1 dst=$2
