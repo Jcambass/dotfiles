@@ -65,6 +65,23 @@ By default, bootstrap never prompts and skips conflicting files.
 USAGE
 }
 
+print_reload_hint () {
+  local shell_name
+  shell_name="$(basename "${SHELL:-}" 2>/dev/null || true)"
+
+  case "$shell_name" in
+    zsh)
+      info "reload this shell with: source ~/.zshenv && source ~/.zshrc"
+      ;;
+    bash)
+      info "reload this shell with: source ~/.bashrc"
+      ;;
+    *)
+      info "open a new shell, or source your shell startup files to pick up changes"
+      ;;
+  esac
+}
+
 print_summary () {
   local warning
 
@@ -75,6 +92,8 @@ print_summary () {
     printf "\r  [ .. ] bootstrap summary: %s linked, %s already linked, %s skipped, %s overwritten, %s backed up, %s install scripts\n" \
       "$linked_count" "$already_linked_count" "$skipped_count" "$overwritten_count" "$backed_up_count" "$install_count"
   fi
+
+  print_reload_hint
 
   if [ "${#bootstrap_warnings[@]}" -eq 0 ]; then
     return 0
