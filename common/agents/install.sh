@@ -1,11 +1,43 @@
 #!/usr/bin/env bash
 
+_agents_warnings=()
+
 _agents_log() {
   printf '  [ agents ] %s\n' "$*"
 }
 
+_agents_supports_color() {
+  [ -t 2 ] && [ -z "${NO_COLOR:-}" ]
+}
+
 _agents_warn() {
-  printf '  [ agents ] warning: %s\n' "$*" >&2
+  local message="$*"
+  _agents_warnings+=("$message")
+
+  if _agents_supports_color; then
+    printf '  [ \033[00;33magents\033[0m ] \033[00;33mwarning:\033[0m %s\n' "$message" >&2
+  else
+    printf '  [ agents ] warning: %s\n' "$message" >&2
+  fi
+}
+
+_agents_print_warning_summary() {
+  local warning count
+  count="${#_agents_warnings[@]}"
+
+  if [ "$count" -eq 0 ]; then
+    return 0
+  fi
+
+  if _agents_supports_color; then
+    printf '  [ \033[00;33magents\033[0m ] \033[00;33m%d warning(s)\033[0m during agent setup:\n' "$count" >&2
+  else
+    printf '  [ agents ] %d warning(s) during agent setup:\n' "$count" >&2
+  fi
+
+  for warning in "${_agents_warnings[@]}"; do
+    printf '    - %s\n' "$warning" >&2
+  done
 }
 
 _agents_root() {
@@ -560,6 +592,8 @@ _agents_main() {
   if [ "$failures" -gt 0 ]; then
     _agents_warn "completed with $failures non-fatal issue(s)"
   fi
+
+  _agents_print_warning_summary
 }
 
 _agents_main "$@"
