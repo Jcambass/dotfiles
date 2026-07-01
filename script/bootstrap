@@ -42,7 +42,7 @@ link_file () {
     if [ "$overwrite_all" == "false" ] && [ "$backup_all" == "false" ] && [ "$skip_all" == "false" ]
     then
 
-      local currentSrc="$(readlink $dst)"
+      local currentSrc="$(readlink "$dst")"
 
       if [ "$currentSrc" == "$src" ]
       then
@@ -68,7 +68,7 @@ link_file () {
           S )
             skip_all=true;;
           * )
-            ;;
+            skip=true;;
         esac
 
       fi
@@ -99,8 +99,11 @@ link_file () {
 
   if [ "$skip" != "true" ]  # "false" or empty
   then
-    ln -s "$1" "$2"
-    success "linked $1 to $2"
+    if ln -s "$1" "$2"; then
+      success "linked $1 to $2"
+    else
+      fail "could not link $1 to $2"
+    fi
   fi
 }
 
