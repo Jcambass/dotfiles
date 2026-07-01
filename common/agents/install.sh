@@ -294,7 +294,7 @@ _agents_same_path() {
 }
 
 _agents_safe_link() {
-  local src="$1" dest="$2"
+  local src="$1" dest="$2" conflict_mode="${3:-skip}" backup
 
   if [ -d "$src" ] && [ -d "$dest" ] && [ ! -L "$dest" ]; then
     _agents_link_tree "$src" "$dest"
@@ -304,6 +304,10 @@ _agents_safe_link() {
   if [ -e "$dest" ] || [ -L "$dest" ]; then
     if [ -L "$dest" ]; then
       rm "$dest" || return 1
+    elif [ "$conflict_mode" = "backup" ]; then
+      backup="$dest.dotfiles-backup-$(date +%Y%m%d%H%M%S)"
+      mv "$dest" "$backup" || return 1
+      _agents_log "backed up $dest to $backup"
     else
       _agents_warn "skipping $dest; exists and is not a symlink"
       return 0
@@ -366,7 +370,7 @@ _agents_link_tree() {
     if [ -d "$item" ]; then
       _agents_link_tree "$item" "$dest_dir/$name" "${root:-}"
     else
-      _agents_safe_link "$item" "$dest_dir/$name"
+      _agents_safe_link "$item" "$dest_dir/$name" backup
     fi
   done
 }
@@ -409,7 +413,7 @@ _agents_link_pi_agent() {
 
   agents_md="$root/.agents/AGENTS.md"
   if [ -f "$agents_md" ]; then
-    _agents_safe_link "$agents_md" "$dest/AGENTS.md"
+    _agents_safe_link "$agents_md" "$dest/AGENTS.md" backup
   fi
 }
 
