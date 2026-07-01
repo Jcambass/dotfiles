@@ -94,12 +94,16 @@ macOS, bpdev, and Codespaces also link the shared agent configuration:
 other dotfiles component; they just link into nested config paths instead of
 directly into `$HOME`.
 
+Shared application configs live in `common/apps`. Bootstrap links htop and
+RubyGems config on every supported environment, and links Ghostty config only on
+macOS because bpdev and Codespaces do not run the host terminal app.
+
 macOS, bpdev, and Codespaces are all first-class agent environments. Bootstrap
 installs the core agent toolchain automatically with Homebrew on macOS and
 `sudo apt-get` on bpdev/Codespaces: `git`, `gh`, `jq`, `ripgrep`, `tmux`,
-Node.js/npm, Pi, OpenCode, WorkIQ, and `pup`. macOS also installs cmux and
-OrbStack when they are missing. bpdev and Codespaces run Pi natively; macOS uses
-the Docker-backed `docker-pi` sandbox by default.
+Node.js/npm, Pi, OpenCode, WorkIQ, and `pup`. macOS also installs cmux, Ghostty,
+and OrbStack when they are missing. bpdev and Codespaces run Pi natively; macOS
+uses the Docker-backed `docker-pi` sandbox by default.
 
 Pi is configured to use GitHub Copilot models by default. The first time you run
 it, authenticate Pi itself:

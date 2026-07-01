@@ -17,6 +17,8 @@ small, explicit, and safe to apply on macOS, bp-dev, and Codespaces.
 - `.agents` and `.pi/agent` are normal managed configuration owned by
   `common/agents`; they just link into nested paths instead of directly into
   `$HOME`.
+- Nested application configs live in `common/apps`. Keep macOS-only app configs
+  gated there instead of linking them on bp-dev or Codespaces.
 
 ## Environment priorities
 
@@ -57,7 +59,7 @@ small, explicit, and safe to apply on macOS, bp-dev, and Codespaces.
 Run focused checks after changes:
 
 ```sh
-bash -n script/bootstrap script/common-link common/agents/install.sh common/agents/pi.sh
+bash -n script/bootstrap script/common-link common/agents/install.sh common/agents/pi.sh common/apps/install.sh
 zsh -n common/zsh/zshenv.symlink common/zsh/zshrc.symlink common/zsh/config.zsh common/agents/pi.zsh
 python3 -m json.tool common/agents/opencode.json >/dev/null
 ```

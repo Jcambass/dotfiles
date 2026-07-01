@@ -54,6 +54,14 @@ if ! command -v cmux >/dev/null 2>&1 && command -v brew >/dev/null 2>&1; then
   brew install --cask cmux
 fi
 
+if ! command -v ghostty >/dev/null 2>&1 \
+  && [ ! -d /Applications/Ghostty.app ] \
+  && [ ! -d "$HOME/Applications/Ghostty.app" ] \
+  && command -v brew >/dev/null 2>&1; then
+  echo "  Installing Ghostty."
+  brew install --cask ghostty
+fi
+
 if ! command -v docker >/dev/null 2>&1 && command -v brew >/dev/null 2>&1; then
   echo "  Installing OrbStack for docker-pi."
   brew install --cask orbstack

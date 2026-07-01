@@ -113,6 +113,9 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+export DOTFILES_OVERWRITE_CONFLICTS="${DOTFILES_OVERWRITE_CONFLICTS:-}"
+export DOTFILES_BACKUP_CONFLICTS="${DOTFILES_BACKUP_CONFLICTS:-}"
+
 link_file () {
   local src=$1 dst=$2
 

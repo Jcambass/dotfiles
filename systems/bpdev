@@ -1,4 +1,5 @@
 common/agents
+common/apps
 common/bash
 common/git
 common/tmux
