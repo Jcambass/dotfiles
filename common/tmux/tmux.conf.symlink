@@ -16,6 +16,10 @@ set -ga terminal-overrides ',*:Tc'
 set -g mouse on
 set -g history-limit 100000
 
+# Let TUIs such as Pi use OSC 52 clipboard writes through tmux for commands
+# like `/copy`.
+set -g set-clipboard on
+
 # Keep tmux out of the way visually when Pi is using it as a wrapper.
 set -g pane-border-status off
 set -g pane-border-lines spaces

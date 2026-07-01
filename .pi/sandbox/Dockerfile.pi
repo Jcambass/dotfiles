@@ -114,7 +114,7 @@ fi
 tmux_conf=/tmp/pi-tmux.conf
 {
   [ -f /root/.tmux.conf ] && cat /root/.tmux.conf
-  printf '%s\n' 'set -g extended-keys on' 'set -gq extended-keys-format csi-u'
+  printf '%s\n' 'set -g extended-keys on' 'set -gq extended-keys-format csi-u' 'set -g set-clipboard on'
 } > "$tmux_conf"
 
 # tmux execs the command argv directly (no shell), so pass args through as-is.
