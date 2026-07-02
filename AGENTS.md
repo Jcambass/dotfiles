@@ -26,8 +26,8 @@ small, explicit, and safe to apply on macOS, bp-dev, and Codespaces.
 - Codespaces should stay supported, but it is used less often.
 - Prefer behavior that works on both macOS and bp-dev. If something only works
   in one environment, gate it explicitly and document why.
-- Pi should run natively on macOS, bp-dev, and Codespaces. Do not reintroduce
-  Docker-backed `docker-pi` behavior.
+- Pi should run natively on macOS, bp-dev, and Codespaces. Do not add a
+  container-backed launcher back to the Pi path.
 
 ## Bootstrap rules
 

@@ -70,10 +70,8 @@ This will symlink the appropriate files in `.dotfiles` to your home directory.
 Everything is configured and tweaked within `~/.dotfiles`.
 
 Bootstrap is non-interactive. It skips conflicting files by default, prints
-warnings, and shows a summary at the end. It also installs managed agent CLI
-extensions like `gh-slack`; when a prebuilt extension binary is unavailable,
-bootstrap builds it from source if Go is installed. To replace existing files
-with the managed dotfiles versions, run:
+warnings, and shows a summary at the end. To replace existing files with the
+managed dotfiles versions, run:
 
 ```sh
 script/bootstrap --force
@@ -103,11 +101,8 @@ macOS because bpdev and Codespaces do not run the host terminal app.
 macOS, bpdev, and Codespaces are all first-class agent environments. Bootstrap
 installs the core agent toolchain automatically with Homebrew on macOS and
 `sudo apt-get` on bpdev/Codespaces: `git`, `gh`, `jq`, `ripgrep`, `tmux`,
-Node.js/npm, Pi, OpenCode, WorkIQ, and `pup`. It also installs the `gh-slack`
-GitHub CLI extension for Slack thread capture, falling back to a local Go source
-build when upstream does not publish a matching binary. macOS also installs cmux
-and Ghostty when they are missing. Pi runs natively on macOS, bpdev, and
-Codespaces; interactive launches use a tmux session by default.
+Node.js/npm, Pi, OpenCode, WorkIQ, and `pup`. macOS also installs cmux and
+Ghostty when they are missing. Pi runs natively on macOS, bpdev, and Codespaces.
 
 Pi is configured to use GitHub Copilot models by default. The first time you run
 it, authenticate Pi itself:
@@ -117,7 +112,7 @@ it, authenticate Pi itself:
 ```
 
 Choose GitHub Copilot and leave the Enterprise domain blank unless you need one.
-Pi stores that auth in `~/.pi/agent/auth.json`. If Pi says `No API key found for
+Pi stores auth in `~/.pi/agent/auth.json`. If Pi says `No API key found for
 github-copilot`, run `/login`.
 
 The main file you'll want to change right off the bat is `zsh/zshrc.symlink`,

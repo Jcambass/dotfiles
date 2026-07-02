@@ -1,8 +1,8 @@
 # --- Pi launcher -------------------------------------------------------------
-# Run Pi natively on macOS, bp-dev, and Codespaces.
-# Interactive invocations open or reattach a tmux session so Pi has a stable TUI.
-# Set PI_NO_TMUX=1 to run interactive Pi directly.
-# Note: this file is sourced by both zsh and bash, so keep it portable.
+# Run Pi natively everywhere. Interactive sessions are wrapped in tmux by
+# default so Pi gets a stable terminal surface without a container.
+#
+# This file is sourced by both zsh and bash, so keep it portable.
 
 __pi_dotfiles_system_type() {
   if [ -n "${DOTFILE_SYSTEM_TYPE:-}" ]; then
@@ -25,7 +25,34 @@ __pi_dotfiles_system_type() {
     return
   fi
 
-  printf '%s' unknown
+  if [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
+    printf '%s' macos
+    return
+  fi
+
+  printf '%s' native
+}
+
+__pi_real_command() {
+  if [ -n "${PI_BINARY:-}" ] && [ -x "$PI_BINARY" ]; then
+    printf '%s\n' "$PI_BINARY"
+    return
+  fi
+
+  if [ -n "${ZSH_VERSION:-}" ] && command -v whence >/dev/null 2>&1; then
+    whence -p pi 2>/dev/null && return
+  fi
+
+  if [ -n "${BASH_VERSION:-}" ] && type -P pi >/dev/null 2>&1; then
+    type -P pi
+    return
+  fi
+
+  command -v pi 2>/dev/null
+}
+
+__pi_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
 __pi_should_run_directly() {
@@ -38,63 +65,54 @@ __pi_should_run_directly() {
   return 1
 }
 
-__pi_default_tmux_session_name() {
+__pi_default_session_name() {
   case "$(__pi_dotfiles_system_type)" in
-    macos) printf '%s' pi-macos ;;
-    codespaces) printf '%s' pi-codespace ;;
-    bpdev) printf '%s' pi-bpdev ;;
-    *) printf '%s' pi ;;
+    macos) printf '%s\n' pi-macos ;;
+    bpdev) printf '%s\n' pi-bpdev ;;
+    codespaces) printf '%s\n' pi-codespace ;;
+    *) printf '%s\n' pi ;;
   esac
 }
 
-__pi_native_binary() {
-  local pi_bin=""
-
-  if [ -n "${ZSH_VERSION:-}" ] && command -v whence >/dev/null 2>&1; then
-    pi_bin="$(whence -p pi 2>/dev/null || true)"
+__pi_interactive_shell() {
+  if [ -n "${ZSH_VERSION:-}" ]; then
+    printf '%s\n' zsh
   elif [ -n "${BASH_VERSION:-}" ]; then
-    pi_bin="$(type -P pi 2>/dev/null || true)"
+    printf '%s\n' bash
+  else
+    printf '%s\n' sh
   fi
-
-  if [ -z "$pi_bin" ]; then
-    pi_bin="$(command -v pi 2>/dev/null || true)"
-  fi
-
-  [ -n "$pi_bin" ] || return 1
-  printf '%s\n' "$pi_bin"
 }
 
-# Reattach to the existing Pi tmux session when one already exists.
-# Run short-lived/non-interactive pi commands directly so tmux doesn't briefly
-# attach and leak terminal probe replies back into the parent shell.
 pi() {
-  if [ -n "${TMUX:-}" ] \
-    || [ -n "${PI_NO_TMUX:-}" ] \
+  local pi_bin session_name pi_command arg interactive_shell
+  pi_bin="$(__pi_real_command)"
+  if [ -z "$pi_bin" ]; then
+    printf 'pi: native pi binary not found on PATH\n' >&2
+    return 127
+  fi
+
+  if [ -n "${PI_NO_TMUX:-}" ] \
+    || [ -n "${TMUX:-}" ] \
     || ! command -v tmux >/dev/null 2>&1 \
     || [ ! -t 0 ] \
     || [ ! -t 1 ] \
     || __pi_should_run_directly "${1:-}"; then
-    command pi "$@"
+    "$pi_bin" "$@"
     return
   fi
 
-  local pi_bin=""
-  pi_bin="$(__pi_native_binary)" || {
-    echo "pi: native pi binary not found on PATH" >&2
-    return 127
-  }
-
-  local session_name="${PI_TMUX_SESSION_NAME:-$(__pi_default_tmux_session_name)}"
-  local pi_command="exec $(printf '%q' "$pi_bin")"
-  local arg
-  for arg in "$@"; do
-    pi_command="${pi_command} $(printf '%q' "$arg")"
-  done
-
+  session_name="${PI_TMUX_SESSION_NAME:-$(__pi_default_session_name)}"
   if command tmux has-session -t "$session_name" 2>/dev/null; then
     command tmux attach-session -t "$session_name"
     return
   fi
 
-  command tmux new-session -s "$session_name" -c "$PWD" "$pi_command"
+  pi_command="exec $(__pi_quote "$pi_bin")"
+  for arg in "$@"; do
+    pi_command="${pi_command} $(__pi_quote "$arg")"
+  done
+
+  interactive_shell="$(__pi_interactive_shell)"
+  command tmux new-session -s "$session_name" -c "$PWD" "$interactive_shell -ic $(__pi_quote "$pi_command")"
 }
