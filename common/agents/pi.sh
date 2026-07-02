@@ -241,7 +241,7 @@ __pi_global_skills_are_project_skills() {
 # docker-pi if Git operations need GitHub auth. For Pi model auth, run `/login`
 # inside Pi and choose GitHub Copilot.
 docker-pi() {
-  local docker_pi_version="2026-07-02.3"
+  local docker_pi_version="2026-07-02.4"
   local image="${PI_DOCKER_IMAGE:-pi-sandbox}"
   local agent_volume="${PI_DOCKER_AGENT_VOLUME:-pi-agent-home}"
 
@@ -465,8 +465,8 @@ EOF
     esac
 
     local team="${PI_DOCKER_SLACK_TEAM:-github}"
-    if ! command -v gh >/dev/null 2>&1; then
-      slack_auth_status="unavailable (host gh not found)"
+    if ! command -v gh-slack >/dev/null 2>&1; then
+      slack_auth_status="unavailable (host gh-slack not found)"
       return 0
     fi
 
@@ -476,32 +476,14 @@ EOF
     }
     chmod 600 "$slack_auth_env_file" 2>/dev/null || true
 
-    __pi_capture_docker_slack_auth() {
-      gh slack auth -t "$team" 2>/dev/null | awk '
-        /^export SLACK_TOKEN=/ { sub(/^export /, ""); print; token=1; next }
-        /^export SLACK_COOKIES=/ { sub(/^export /, ""); print; cookies=1; next }
-        END { if (!token || !cookies) exit 1 }
-      ' > "$slack_auth_env_file"
-    }
-
-    if __pi_capture_docker_slack_auth; then
+    if gh-slack auth -t "$team" 2>/dev/null | awk '
+      /^export SLACK_TOKEN=/ { sub(/^export /, ""); print; token=1; next }
+      /^export SLACK_COOKIES=/ { sub(/^export /, ""); print; cookies=1; next }
+      END { if (!token || !cookies) exit 1 }
+    ' > "$slack_auth_env_file"; then
       slack_args+=(--env-file "$slack_auth_env_file")
       slack_auth_status="enabled for team '$team'"
       return 0
-    fi
-
-    if ! gh slack --help >/dev/null 2>&1; then
-      gh extension install https://github.com/rneatherway/gh-slack >/dev/null 2>&1 || true
-      if __pi_capture_docker_slack_auth; then
-        slack_args+=(--env-file "$slack_auth_env_file")
-        slack_auth_status="enabled for team '$team'"
-        return 0
-      fi
-      if ! gh slack --help >/dev/null 2>&1; then
-        __pi_cleanup_docker_slack_auth
-        slack_auth_status="unavailable (host gh-slack extension not installed)"
-        return 0
-      fi
     fi
 
     __pi_cleanup_docker_slack_auth
@@ -682,13 +664,7 @@ EOF
         else
           printf "  %-34s MISSING\n" "env auth"
         fi
-        if gh slack --help >/dev/null 2>&1; then
-          printf "  %-34s ok (gh slack)\n" "gh-slack command"
-        elif gh-slack --help >/dev/null 2>&1; then
-          printf "  %-34s ok (gh-slack)\n" "gh-slack command"
-        else
-          printf "  %-34s MISSING\n" "gh-slack command"
-        fi
+        gh-slack --help >/dev/null 2>&1 && printf "  %-34s ok\n" "gh-slack command" || printf "  %-34s MISSING\n" "gh-slack command"
         echo
         echo "extensions visible in container:"
         if [ -d /root/.pi/agent/extensions ]; then

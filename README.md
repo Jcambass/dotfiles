@@ -114,10 +114,10 @@ commands without committing machine-local SSH details. Set
 skip agent forwarding.
 
 `docker-pi` also mounts the host Slack app configuration read-only when present.
-For Slack thread reads on macOS, it tries to fetch keychain-backed Slack auth
-through the host `gh-slack` extension and pass it into the temporary container
-without printing or storing it in this repository. Set `PI_DOCKER_SLACK_AUTH=0`
-to disable that forwarding.
+For Slack thread reads on macOS, it fetches keychain-backed Slack auth through
+the host `gh-slack` command and passes it into the temporary container without
+printing or storing it in this repository. Bootstrap installs `gh-slack` on
+macOS. Set `PI_DOCKER_SLACK_AUTH=0` to disable that forwarding.
 
 Bootstrap builds the `docker-pi` image on macOS when it is missing or when the
 managed `.pi/sandbox/Dockerfile.pi` changes. Set `DOTFILES_SKIP_DOCKER_PI_BUILD=1`

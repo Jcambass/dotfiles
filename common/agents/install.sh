@@ -341,6 +341,26 @@ _agents_can_install_gh_slack_release() {
   esac
 }
 
+_agents_install_gh_slack_shim() {
+  local bin_dir="$HOME/.local/bin"
+  local shim="$bin_dir/gh-slack"
+
+  if command -v gh-slack >/dev/null 2>&1; then
+    return 0
+  fi
+
+  mkdir -p "$bin_dir" || {
+    _agents_warn "could not create $bin_dir; skipping gh-slack shim"
+    return 0
+  }
+
+  cat > "$shim" <<'EOF'
+#!/usr/bin/env bash
+exec gh slack "$@"
+EOF
+  chmod +x "$shim" || _agents_warn "could not make $shim executable"
+}
+
 _agents_install_gh_slack_from_source() {
   local src_dir src_parent tag commit version ldflags
 
@@ -402,6 +422,10 @@ _agents_install_gh_slack_from_source() {
     return 0
   }
   chmod +x "$src_dir/gh-slack" || true
+  mkdir -p "$HOME/.local/bin" || true
+  cp "$src_dir/gh-slack" "$HOME/.local/bin/gh-slack" 2>/dev/null \
+    && chmod +x "$HOME/.local/bin/gh-slack" \
+    || _agents_warn "could not install gh-slack binary to $HOME/.local/bin; continuing"
 
   _agents_log "installing gh-slack extension from local source"
   (cd "$src_dir" && gh extension install . --force) \
@@ -422,13 +446,21 @@ _agents_ensure_gh_slack() {
     return 0
   fi
 
+  if command -v gh-slack >/dev/null 2>&1; then
+    return 0
+  fi
+
   if gh slack --help >/dev/null 2>&1; then
+    _agents_install_gh_slack_shim
     return 0
   fi
 
   if _agents_can_install_gh_slack_release; then
     _agents_log "installing gh-slack extension"
-    gh extension install https://github.com/rneatherway/gh-slack && return 0
+    if gh extension install https://github.com/rneatherway/gh-slack; then
+      _agents_install_gh_slack_shim
+      return 0
+    fi
     _agents_warn "gh-slack extension install failed; falling back to source build"
   else
     _agents_log "building gh-slack extension from source for $(uname -s)/$(uname -m)"
