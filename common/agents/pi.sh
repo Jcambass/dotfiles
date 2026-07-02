@@ -127,6 +127,55 @@ __pi_dockerfile_path() {
   return 1
 }
 
+__pi_agents_libexec_dir() {
+  local source_path="" dotfiles_dir="" candidate=""
+
+  if [ -n "${DOTFILES_ROOT:-}" ]; then
+    candidate="$DOTFILES_ROOT/common/agents/libexec"
+    if [ -d "$candidate" ]; then
+      __pi_realpath "$candidate" 2>/dev/null || printf '%s\n' "$candidate"
+      return
+    fi
+  fi
+
+  source_path="$(__pi_shellrc_path)"
+  dotfiles_dir="$(dirname "$source_path")"
+  candidate="$dotfiles_dir/libexec"
+  if [ -d "$candidate" ]; then
+    __pi_realpath "$candidate" 2>/dev/null || printf '%s\n' "$candidate"
+    return
+  fi
+
+  candidate="$PWD/common/agents/libexec"
+  if [ -d "$candidate" ]; then
+    __pi_realpath "$candidate" 2>/dev/null || printf '%s\n' "$candidate"
+    return
+  fi
+
+  return 1
+}
+
+__pi_sha256_file() {
+  local file="$1"
+
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+    return
+  fi
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+    return
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$file" | awk '{print $NF}'
+    return
+  fi
+
+  return 1
+}
+
 __pi_same_path() {
   local a="" b=""
   a="$(__pi_realpath "$1" 2>/dev/null)" || return 1
@@ -172,6 +221,16 @@ __pi_global_skills_are_project_skills() {
 #                           run `/login` once on first use)
 #   PI_DOCKER_IN_DOCKER    start Docker inside sandbox   (default: 1; set 0 to disable)
 #   PI_DOCKER_LIB_VOLUME   named volume for inner Docker (default: pi-docker-lib)
+#   PI_DOCKER_SSH_CONFIG   mount ~/.ssh read-only with a Linux-compatible
+#                           generated config (default: 1; set 0 to disable)
+#   PI_DOCKER_SSH_DIR      host SSH directory to mount     (default: ~/.ssh)
+#   PI_DOCKER_SSH_AGENT    forward SSH_AUTH_SOCK when set  (default: 1; set 0 to disable)
+#   PI_DOCKER_SSH_AUTH_SOCK host SSH agent socket override (default: $SSH_AUTH_SOCK)
+#   PI_DOCKER_SLACK_CONFIG mount Slack app config read-only (default: 1; set 0 to disable)
+#   PI_DOCKER_SLACK_DIR    host Slack config dir override
+#   PI_DOCKER_SLACK_AUTH   pass Slack token/cookies from host gh-slack
+#                           (default: auto; set 0 to disable)
+#   PI_DOCKER_SLACK_TEAM   Slack team for PI_DOCKER_SLACK_AUTH (default: github)
 # By default, docker-pi mounts selected host dotfiles read-only from their real
 # locations (~/.gitconfig, ~/.tmux.conf, ~/.pi/agent/*, ~/.agents/*). It
 # deliberately does not bind-mount ~/.pi/agent wholesale, so auth.json,
@@ -182,7 +241,7 @@ __pi_global_skills_are_project_skills() {
 # docker-pi if Git operations need GitHub auth. For Pi model auth, run `/login`
 # inside Pi and choose GitHub Copilot.
 docker-pi() {
-  local docker_pi_version="2026-06-29.2"
+  local docker_pi_version="2026-07-02.3"
   local image="${PI_DOCKER_IMAGE:-pi-sandbox}"
   local agent_volume="${PI_DOCKER_AGENT_VOLUME:-pi-agent-home}"
 
@@ -207,7 +266,15 @@ docker-pi() {
       echo "docker-pi: start Docker/OrbStack, or add its docker CLI to PATH" >&2
       return 127
     fi
-    "$docker_bin" build "$@" -t "$image" -f "$dockerfile" "$docker_context"
+    local dockerfile_hash=""
+    dockerfile_hash="$(__pi_sha256_file "$dockerfile" 2>/dev/null || true)"
+    if [ -n "$dockerfile_hash" ]; then
+      "$docker_bin" build \
+        --label "com.jcambass.dotfiles.pi-sandbox-dockerfile-sha256=$dockerfile_hash" \
+        "$@" -t "$image" -f "$dockerfile" "$docker_context"
+    else
+      "$docker_bin" build "$@" -t "$image" -f "$dockerfile" "$docker_context"
+    fi
     return
   fi
 
@@ -264,6 +331,183 @@ docker-pi() {
     -e GIT_CONFIG_KEY_2=credential.https://gist.github.com.helper
     -e 'GIT_CONFIG_VALUE_2=!gh auth git-credential'
   )
+
+  local ssh_args=()
+  local ssh_runtime_dir=""
+  local ssh_config_status="disabled"
+  local ssh_agent_status="disabled"
+  __pi_cleanup_docker_ssh_config() {
+    if [ -n "$ssh_runtime_dir" ] && [ -d "$ssh_runtime_dir" ]; then
+      rm -rf "$ssh_runtime_dir"
+    fi
+    ssh_runtime_dir=""
+  }
+
+  __pi_setup_docker_ssh_agent() {
+    if [ "${PI_DOCKER_SSH_AGENT:-1}" = "0" ]; then
+      ssh_agent_status="disabled"
+      return 0
+    fi
+
+    local agent_sock="${PI_DOCKER_SSH_AUTH_SOCK:-${SSH_AUTH_SOCK:-}}"
+    if [ -z "$agent_sock" ]; then
+      ssh_agent_status="unavailable (SSH_AUTH_SOCK is unset)"
+      return 0
+    fi
+    if [ ! -S "$agent_sock" ]; then
+      ssh_agent_status="unavailable (agent socket missing)"
+      return 0
+    fi
+
+    ssh_args+=(-v "${agent_sock}:/tmp/docker-pi-ssh-agent.sock" -e SSH_AUTH_SOCK=/tmp/docker-pi-ssh-agent.sock)
+    ssh_agent_status="enabled"
+  }
+  __pi_setup_docker_ssh_agent
+
+  __pi_setup_docker_ssh_config() {
+    if [ "${PI_DOCKER_SSH_CONFIG:-1}" = "0" ]; then
+      ssh_config_status="disabled"
+      return 0
+    fi
+
+    local ssh_dir="${PI_DOCKER_SSH_DIR:-$HOME/.ssh}"
+    if [ ! -d "$ssh_dir" ]; then
+      ssh_config_status="unavailable (no SSH directory)"
+      return 0
+    fi
+
+    local real_ssh_dir=""
+    real_ssh_dir="$(__pi_realpath "$ssh_dir" 2>/dev/null)" || real_ssh_dir="$ssh_dir"
+    ssh_args+=(-v "${real_ssh_dir}:/root/.ssh:ro")
+    ssh_config_status="enabled (SSH directory mounted read-only)"
+
+    if [ ! -f "$real_ssh_dir/config" ]; then
+      return 0
+    fi
+
+    ssh_runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/docker-pi-ssh.XXXXXX")" || {
+      ssh_config_status="enabled (raw SSH directory; failed to create config overlay)"
+      return 0
+    }
+
+    local generated_config="$ssh_runtime_dir/config"
+    local libexec_dir="" filter=""
+    libexec_dir="$(__pi_agents_libexec_dir 2>/dev/null || true)"
+    filter="${libexec_dir:+$libexec_dir/pi-ssh-config-filter.mjs}"
+
+    if [ -n "$filter" ] && [ -f "$filter" ] && command -v node >/dev/null 2>&1; then
+      if node "$filter" --input "$real_ssh_dir/config" --output "$generated_config" --host-home "$HOME" --container-home /root >/dev/null 2>&1; then
+        ssh_args+=(-v "${generated_config}:/root/.ssh/config:ro")
+        ssh_config_status="enabled (sanitized SSH config)"
+        return 0
+      fi
+    fi
+
+    cat > "$generated_config" <<'EOF'
+# Generated by docker-pi.
+# Host SSH config could not be sanitized, so only keys and known_hosts are mounted.
+EOF
+    chmod 600 "$generated_config" 2>/dev/null || true
+    ssh_args+=(-v "${generated_config}:/root/.ssh/config:ro")
+    ssh_config_status="enabled (keys only; config sanitizer unavailable)"
+  }
+  __pi_setup_docker_ssh_config
+
+  local slack_args=()
+  local slack_config_status="disabled"
+  local slack_auth_status="disabled"
+  local slack_config_host_path=""
+  local slack_auth_env_file=""
+  __pi_cleanup_docker_slack_auth() {
+    if [ -n "$slack_auth_env_file" ] && [ -f "$slack_auth_env_file" ]; then
+      rm -f "$slack_auth_env_file"
+    fi
+    slack_auth_env_file=""
+  }
+
+  __pi_setup_docker_slack_config() {
+    if [ "${PI_DOCKER_SLACK_CONFIG:-1}" = "0" ]; then
+      slack_config_status="disabled"
+      return 0
+    fi
+
+    local candidate="" real_slack_dir=""
+    local candidates=()
+    [ -n "${PI_DOCKER_SLACK_DIR:-}" ] && candidates+=("$PI_DOCKER_SLACK_DIR")
+    candidates+=(
+      "$HOME/Library/Application Support/Slack"
+      "$HOME/Library/Containers/com.tinyspeck.slackmacgap/Data/Library/Application Support/Slack"
+      "${XDG_CONFIG_HOME:-$HOME/.config}/Slack"
+      "$HOME/.config/Slack"
+    )
+
+    for candidate in "${candidates[@]}"; do
+      [ -n "$candidate" ] || continue
+      if [ -d "$candidate" ]; then
+        real_slack_dir="$(__pi_realpath "$candidate" 2>/dev/null)" || real_slack_dir="$candidate"
+        slack_args+=(-v "${real_slack_dir}:/root/.config/Slack:ro")
+        slack_config_host_path="$real_slack_dir"
+        slack_config_status="enabled (Slack config mounted read-only)"
+        return 0
+      fi
+    done
+
+    slack_config_status="unavailable (no Slack config directory)"
+  }
+  __pi_setup_docker_slack_config
+
+  __pi_setup_docker_slack_auth() {
+    case "${PI_DOCKER_SLACK_AUTH:-auto}" in
+      0|false|no|off)
+        slack_auth_status="disabled"
+        return 0
+        ;;
+    esac
+
+    local team="${PI_DOCKER_SLACK_TEAM:-github}"
+    if ! command -v gh >/dev/null 2>&1; then
+      slack_auth_status="unavailable (host gh not found)"
+      return 0
+    fi
+
+    slack_auth_env_file="$(mktemp "${TMPDIR:-/tmp}/docker-pi-slack.XXXXXX")" || {
+      slack_auth_status="unavailable (failed to create auth env file)"
+      return 0
+    }
+    chmod 600 "$slack_auth_env_file" 2>/dev/null || true
+
+    __pi_capture_docker_slack_auth() {
+      gh slack auth -t "$team" 2>/dev/null | awk '
+        /^export SLACK_TOKEN=/ { sub(/^export /, ""); print; token=1; next }
+        /^export SLACK_COOKIES=/ { sub(/^export /, ""); print; cookies=1; next }
+        END { if (!token || !cookies) exit 1 }
+      ' > "$slack_auth_env_file"
+    }
+
+    if __pi_capture_docker_slack_auth; then
+      slack_args+=(--env-file "$slack_auth_env_file")
+      slack_auth_status="enabled for team '$team'"
+      return 0
+    fi
+
+    if ! gh slack --help >/dev/null 2>&1; then
+      gh extension install https://github.com/rneatherway/gh-slack >/dev/null 2>&1 || true
+      if __pi_capture_docker_slack_auth; then
+        slack_args+=(--env-file "$slack_auth_env_file")
+        slack_auth_status="enabled for team '$team'"
+        return 0
+      fi
+      if ! gh slack --help >/dev/null 2>&1; then
+        __pi_cleanup_docker_slack_auth
+        slack_auth_status="unavailable (host gh-slack extension not installed)"
+        return 0
+      fi
+    fi
+
+    __pi_cleanup_docker_slack_auth
+    slack_auth_status="unavailable (host gh-slack auth failed)"
+  }
+  __pi_setup_docker_slack_auth
 
   # Pass through only provider credentials / settings that are actually set.
   local env_args=()
@@ -382,8 +626,12 @@ docker-pi() {
     echo "docker-pi doctor version: $docker_pi_version"
     echo "docker-pi function source: $(__pi_shellrc_path 2>/dev/null || printf '%s' "$HOME/.shellrc")"
     echo "docker-pi host config:"
+    echo "  SSH config: $ssh_config_status"
+    echo "  SSH agent: $ssh_agent_status"
+    echo "  Slack config: $slack_config_status"
+    echo "  Slack auth: $slack_auth_status"
     local cfg_path=""
-    for cfg_path in "$home_pi/extensions" "$home_pi/settings.json" "$home_pi/models.json" "$HOME/.gitconfig" "$HOME/.tmux.conf"; do
+    for cfg_path in "$home_pi/extensions" "$home_pi/settings.json" "$home_pi/models.json" "$HOME/.gitconfig" "$HOME/.tmux.conf" "${PI_DOCKER_SSH_DIR:-$HOME/.ssh}" "${slack_config_host_path:-${PI_DOCKER_SLACK_DIR:-$HOME/Library/Application Support/Slack}}"; do
       if [ -e "$cfg_path" ]; then
         printf '  %-34s -> %s\n' "$cfg_path" "$(__pi_realpath "$cfg_path" 2>/dev/null || printf '%s' "$cfg_path")"
       else
@@ -403,16 +651,38 @@ docker-pi() {
       "${project_args[@]}" \
       -v "${agent_volume}:/root/.pi/agent" \
       "${cfg_args[@]}" \
+      "${ssh_args[@]}" \
+      "${slack_args[@]}" \
       --entrypoint sh \
       "$image" -lc '
         echo "container config:"
-        for cfg_path in /root/.pi/agent/extensions /root/.pi/agent/settings.json /root/.pi/agent/models.json /root/.gitconfig /root/.tmux.conf; do
+        for cfg_path in /root/.pi/agent/extensions /root/.pi/agent/settings.json /root/.pi/agent/models.json /root/.gitconfig /root/.tmux.conf /root/.ssh /root/.ssh/config /root/.config/Slack /root/.config/Slack/Cookies /root/.config/Slack/Network/Cookies; do
           if [ -e "$cfg_path" ]; then
             printf "  %-34s present\n" "$cfg_path"
           else
             printf "  %-34s MISSING\n" "$cfg_path"
           fi
         done
+        echo
+        echo "ssh:"
+        command -v ssh >/dev/null 2>&1 && printf "  %-34s %s\n" "ssh binary" "$(command -v ssh)" || printf "  %-34s MISSING\n" "ssh binary"
+        if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+          printf "  %-34s present\n" "agent socket"
+          ssh-add -l >/dev/null 2>&1 && printf "  %-34s ok\n" "agent identities" || printf "  %-34s unavailable\n" "agent identities"
+        else
+          printf "  %-34s MISSING\n" "agent socket"
+        fi
+        if [ -f /root/.ssh/config ]; then
+          ssh -G github.com >/dev/null 2>&1 && printf "  %-34s ok\n" "config parse" || printf "  %-34s failed\n" "config parse"
+        fi
+        echo
+        echo "slack:"
+        if [ -n "${SLACK_TOKEN:-}" ] && [ -n "${SLACK_COOKIES:-}" ]; then
+          printf "  %-34s present\n" "env auth"
+        else
+          printf "  %-34s MISSING\n" "env auth"
+        fi
+        gh slack --help >/dev/null 2>&1 && printf "  %-34s ok\n" "gh-slack extension" || printf "  %-34s MISSING\n" "gh-slack extension"
         echo
         echo "extensions visible in container:"
         if [ -d /root/.pi/agent/extensions ]; then
@@ -421,14 +691,17 @@ docker-pi() {
           echo "  none"
         fi
       '
-    return
+    local doctor_status=$?
+    __pi_cleanup_docker_ssh_config
+    __pi_cleanup_docker_slack_auth
+    return "$doctor_status"
   fi
 
   # Keep agent home in a named volume (host auth stays out). Subshell-scoped
-  # EXIT trap clears the status indicator without leaking the trap into the
-  # interactive shell.
+  # EXIT trap clears the status indicator and temporary auth/config files without
+  # leaking the trap into the interactive shell.
   (
-    trap '__pi_container_status_off' EXIT
+    trap '__pi_container_status_off; __pi_cleanup_docker_ssh_config; __pi_cleanup_docker_slack_auth' EXIT
     __pi_container_status_on
     "$docker_bin" run --rm -i "${tty_args[@]}" "${docker_args[@]}" "${git_config_args[@]}" "${env_args[@]}" \
       -e PI_RUN_TMUX="$run_tmux" -e TERM \
@@ -436,6 +709,8 @@ docker-pi() {
       "${project_args[@]}" \
       -v "${agent_volume}:/root/.pi/agent" \
       "${cfg_args[@]}" \
+      "${ssh_args[@]}" \
+      "${slack_args[@]}" \
       "$image" "$@"
   )
 }

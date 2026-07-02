@@ -245,6 +245,82 @@ _agents_ensure_gh() {
     || _agents_warn "GitHub CLI install failed; continuing"
 }
 
+_agents_sha256_file() {
+  local file="$1"
+
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+    return
+  fi
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+    return
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$file" | awk '{print $NF}'
+    return
+  fi
+
+  return 1
+}
+
+_agents_ensure_docker_pi_image() {
+  local root dockerfile docker_context docker_bin image label expected_hash current_hash
+
+  if [ -n "${DOTFILES_SKIP_DOCKER_PI_BUILD:-}" ]; then
+    return 0
+  fi
+
+  if ! _agents_is_macos; then
+    return 0
+  fi
+
+  root="$(_agents_root)"
+  dockerfile="$root/.pi/sandbox/Dockerfile.pi"
+  [ -f "$dockerfile" ] || return 0
+
+  docker_bin="$(command -v docker 2>/dev/null || true)"
+  if [ -z "$docker_bin" ]; then
+    _agents_warn "docker unavailable; skipping docker-pi image build"
+    return 0
+  fi
+
+  if ! "$docker_bin" info >/dev/null 2>&1; then
+    _agents_warn "docker daemon unavailable; skipping docker-pi image build"
+    return 0
+  fi
+
+  expected_hash="$(_agents_sha256_file "$dockerfile" 2>/dev/null || true)"
+  if [ -z "$expected_hash" ]; then
+    _agents_warn "could not hash $dockerfile; skipping docker-pi image build"
+    return 0
+  fi
+
+  image="${PI_DOCKER_IMAGE:-pi-sandbox}"
+  label="com.jcambass.dotfiles.pi-sandbox-dockerfile-sha256"
+  current_hash="$($docker_bin image inspect "$image" --format "{{ index .Config.Labels \"$label\" }}" 2>/dev/null || true)"
+
+  if [ "$current_hash" = "$expected_hash" ]; then
+    return 0
+  fi
+
+  docker_context="$(dirname "$dockerfile")"
+  if [ -z "$current_hash" ]; then
+    _agents_log "building docker-pi image $image"
+  else
+    _agents_log "rebuilding docker-pi image $image after Dockerfile change"
+  fi
+
+  "$docker_bin" build \
+    --label "$label=$expected_hash" \
+    -t "$image" \
+    -f "$dockerfile" \
+    "$docker_context" \
+    || _agents_warn "docker-pi image build failed; continuing"
+}
+
 _agents_gh_data_dir() {
   if [ -n "${XDG_DATA_HOME:-}" ]; then
     printf '%s\n' "$XDG_DATA_HOME/gh"
@@ -701,6 +777,7 @@ _agents_main() {
   _agents_link_pi_agent "$root" || failures=$((failures + 1))
   _agents_link_opencode_config "$root" || failures=$((failures + 1))
   _agents_ensure_agent_tools || failures=$((failures + 1))
+  _agents_ensure_docker_pi_image || failures=$((failures + 1))
   _agents_ensure_gh_slack || failures=$((failures + 1))
   _agents_install_or_update_opencode || failures=$((failures + 1))
   _agents_install_or_update_pi || failures=$((failures + 1))

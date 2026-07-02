@@ -105,6 +105,24 @@ Node.js/npm, Pi, OpenCode, WorkIQ, and `pup`. macOS also installs cmux, Ghostty,
 and OrbStack when they are missing. bpdev and Codespaces run Pi natively; macOS
 uses the Docker-backed `docker-pi` sandbox by default.
 
+On macOS, `docker-pi` mounts `~/.ssh` read-only, overlays a generated
+Linux-compatible SSH config inside the container, and forwards `SSH_AUTH_SOCK`
+when an agent is available. This keeps normal SSH keys, encrypted-key agent
+access, host aliases, and compatible proxy settings available to Git and SSH
+commands without committing machine-local SSH details. Set
+`PI_DOCKER_SSH_CONFIG=0` to skip the SSH mount, or `PI_DOCKER_SSH_AGENT=0` to
+skip agent forwarding.
+
+`docker-pi` also mounts the host Slack app configuration read-only when present.
+For Slack thread reads on macOS, it tries to fetch keychain-backed Slack auth
+through the host `gh-slack` extension and pass it into the temporary container
+without printing or storing it in this repository. Set `PI_DOCKER_SLACK_AUTH=0`
+to disable that forwarding.
+
+Bootstrap builds the `docker-pi` image on macOS when it is missing or when the
+managed `.pi/sandbox/Dockerfile.pi` changes. Set `DOTFILES_SKIP_DOCKER_PI_BUILD=1`
+to skip that step.
+
 Pi is configured to use GitHub Copilot models by default. The first time you run
 it, authenticate Pi itself:
 
