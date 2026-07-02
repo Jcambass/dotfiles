@@ -89,6 +89,33 @@ build_panel_template() {
     local url="$1" text="$2"
     echo -ne "\033]8;;${url}\a${text}\033]8;;\a"
   }
+  command_exists() { command -v "$1" >/dev/null 2>&1; }
+  code_command() {
+    if [[ -n "${PI_CODE_COMMAND:-}" ]]; then
+      printf '%s' "$PI_CODE_COMMAND"
+    elif command_exists code-insiders; then
+      printf '%s' code-insiders
+    else
+      printf '%s' code
+    fi
+  }
+  url_encode_path() {
+    python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe="/:@-._~"))' "$1" 2>/dev/null || printf '%s' "$1"
+  }
+  editor_url() {
+    local abs_path="$1"
+    local encoded
+    encoded=$(url_encode_path "$abs_path")
+    case "$(basename "$(code_command)")" in
+      code-insiders) printf 'vscode-insiders://file%s' "$encoded" ;;
+      code) printf 'vscode://file%s' "$encoded" ;;
+      *) printf 'file://%s' "$encoded" ;;
+    esac
+  }
+  file_link() {
+    local abs_path="$1" text="$2"
+    link "$(editor_url "$abs_path")" "$text"
+  }
   # Repeat a Unicode character without relying on locale-sensitive tr(1).
   repeat_char() {
     local count="$1" char="$2" out=""
@@ -397,7 +424,7 @@ for i, t in enumerate(tasks):
       *) ic="?"; co="$GRAY";   lb="staged" ;;
     esac
     local ds="${file_stats[$f]:-}"
-    [[ $file_count -lt $max_files ]] && p " ${co}${ic}${RESET} $(link "file://${git_root}/${f}" "$(short "$f")") ${ds} ${GRAY}${lb}${RESET}"
+    [[ $file_count -lt $max_files ]] && p " ${co}${ic}${RESET} $(file_link "${git_root}/${f}" "$(short "$f")") ${ds} ${GRAY}${lb}${RESET}"
     diff_files+=" ${git_root}/${f}"
     file_count=$((file_count + 1))
   done < <(git diff --cached --name-status 2>/dev/null)
@@ -410,7 +437,7 @@ for i, t in enumerate(tasks):
       M) ic="~"; co="$YELLOW" ;; D) ic="-"; co="$RED" ;; *) ic="?"; co="$GRAY" ;;
     esac
     local ds="${file_stats[$f]:-}"
-    [[ $file_count -lt $max_files ]] && p " ${co}${ic}${RESET} $(link "file://${git_root}/${f}" "$(short "$f")") ${ds}"
+    [[ $file_count -lt $max_files ]] && p " ${co}${ic}${RESET} $(file_link "${git_root}/${f}" "$(short "$f")") ${ds}"
     diff_files+=" ${git_root}/${f}"
     file_count=$((file_count + 1))
   done < <(git diff --name-status 2>/dev/null)
@@ -419,7 +446,7 @@ for i, t in enumerate(tasks):
   while IFS= read -r f; do
     [[ -z "$f" ]] && continue
     local ds="${file_stats[$f]:-}"
-    [[ $file_count -lt $max_files ]] && p " ${GREEN}+${RESET} $(link "file://${git_root}/${f}" "$(short "$f")") ${ds}"
+    [[ $file_count -lt $max_files ]] && p " ${GREEN}+${RESET} $(file_link "${git_root}/${f}" "$(short "$f")") ${ds}"
     diff_files+=" ${git_root}/${f}"
     file_count=$((file_count + 1))
   done < <(git ls-files --others --exclude-standard 2>/dev/null)
