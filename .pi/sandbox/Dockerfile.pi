@@ -70,6 +70,17 @@ RUN set -eux; \
   go telemetry off; \
   go clean -cache -modcache
 
+RUN mv /usr/bin/gh /usr/bin/gh.real
+COPY <<'GH_WRAPPER' /usr/local/bin/gh
+#!/bin/sh
+if [ "${1:-}" = "slack" ]; then
+  shift
+  exec gh-slack "$@"
+fi
+exec /usr/bin/gh.real "$@"
+GH_WRAPPER
+RUN chmod +x /usr/local/bin/gh
+
 ENV GH_CONFIG_DIR=/root/.pi/agent/gh
 ENV XDG_CONFIG_HOME=/root/.pi/agent/config
 ENV DD_TOKEN_STORAGE=file

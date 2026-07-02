@@ -682,7 +682,13 @@ EOF
         else
           printf "  %-34s MISSING\n" "env auth"
         fi
-        gh slack --help >/dev/null 2>&1 && printf "  %-34s ok\n" "gh-slack extension" || printf "  %-34s MISSING\n" "gh-slack extension"
+        if gh slack --help >/dev/null 2>&1; then
+          printf "  %-34s ok (gh slack)\n" "gh-slack command"
+        elif gh-slack --help >/dev/null 2>&1; then
+          printf "  %-34s ok (gh-slack)\n" "gh-slack command"
+        else
+          printf "  %-34s MISSING\n" "gh-slack command"
+        fi
         echo
         echo "extensions visible in container:"
         if [ -d /root/.pi/agent/extensions ]; then
