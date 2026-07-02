@@ -27,6 +27,8 @@ For the full workflow and commands, read
    - If there is no useful shared history, compare the current tree against the
      upstream `main` tree and say that this is a tree comparison, not a commit
      delta.
+   - This repository may have no shared history with `tma/dotfiles`; in that
+     case, treat recent upstream commits as context only, not a precise delta.
 4. List upstream changes before editing:
    - commits since the baseline
    - changed files
@@ -41,11 +43,15 @@ For the full workflow and commands, read
 
 ## Integration rules
 
+- Check `git status` before editing and do not touch unrelated local changes.
 - Do not replace local files wholesale when they contain local-only behavior.
 - Do not remove bp-dev or Codespaces support just because upstream lacks it.
 - Do not remove Docker-backed macOS Pi support unless the user explicitly asks.
 - Do not add private hostnames, credentials, machine names, or internal runbooks.
 - Keep examples generic unless the value is already public in this repository.
+- Do not port upstream owner-specific identity changes directly: keep local
+  `jcambass/` branch naming, `user-curated-voice.md`, and "the user" wording
+  unless the user explicitly asks to adopt `tma` naming.
 - Prefer small, reversible commits.
 
 ## Output shape
