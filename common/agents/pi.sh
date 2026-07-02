@@ -47,6 +47,23 @@ __pi_default_tmux_session_name() {
   esac
 }
 
+__pi_native_binary() {
+  local pi_bin=""
+
+  if [ -n "${ZSH_VERSION:-}" ] && command -v whence >/dev/null 2>&1; then
+    pi_bin="$(whence -p pi 2>/dev/null || true)"
+  elif [ -n "${BASH_VERSION:-}" ]; then
+    pi_bin="$(type -P pi 2>/dev/null || true)"
+  fi
+
+  if [ -z "$pi_bin" ]; then
+    pi_bin="$(command -v pi 2>/dev/null || true)"
+  fi
+
+  [ -n "$pi_bin" ] || return 1
+  printf '%s\n' "$pi_bin"
+}
+
 # Reattach to the existing Pi tmux session when one already exists.
 # Run short-lived/non-interactive pi commands directly so tmux doesn't briefly
 # attach and leak terminal probe replies back into the parent shell.
@@ -61,8 +78,14 @@ pi() {
     return
   fi
 
+  local pi_bin=""
+  pi_bin="$(__pi_native_binary)" || {
+    echo "pi: native pi binary not found on PATH" >&2
+    return 127
+  }
+
   local session_name="${PI_TMUX_SESSION_NAME:-$(__pi_default_tmux_session_name)}"
-  local pi_command="exec pi"
+  local pi_command="exec $(printf '%q' "$pi_bin")"
   local arg
   for arg in "$@"; do
     pi_command="${pi_command} $(printf '%q' "$arg")"
@@ -73,12 +96,5 @@ pi() {
     return
   fi
 
-  local interactive_shell="sh"
-  if [ -n "${ZSH_VERSION:-}" ]; then
-    interactive_shell="zsh"
-  elif [ -n "${BASH_VERSION:-}" ]; then
-    interactive_shell="bash"
-  fi
-
-  command tmux new-session -s "$session_name" -c "$PWD" "$interactive_shell -ic $(printf '%q' "$pi_command")"
+  command tmux new-session -s "$session_name" -c "$PWD" "$pi_command"
 }
