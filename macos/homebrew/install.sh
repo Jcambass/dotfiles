@@ -22,6 +22,15 @@ trust_homebrew_taps() {
   done
 }
 
+has_modern_bash() {
+  for bash_bin in /opt/homebrew/bin/bash /usr/local/bin/bash bash; do
+    command -v "$bash_bin" >/dev/null 2>&1 || continue
+    "$bash_bin" -c '[ "${BASH_VERSINFO[0]}" -ge 4 ]' >/dev/null 2>&1 && return 0
+  done
+
+  return 1
+}
+
 # Check for Homebrew
 if ! command -v brew >/dev/null 2>&1; then
   echo "  Installing Homebrew for you."
@@ -37,6 +46,7 @@ if command -v brew >/dev/null 2>&1; then
   command -v jq >/dev/null 2>&1 || missing_brews="$missing_brews jq"
   command -v rg >/dev/null 2>&1 || missing_brews="$missing_brews ripgrep"
   command -v tmux >/dev/null 2>&1 || missing_brews="$missing_brews tmux"
+  has_modern_bash || missing_brews="$missing_brews bash"
   command -v npm >/dev/null 2>&1 || missing_brews="$missing_brews node"
   command -v opencode >/dev/null 2>&1 || missing_brews="$missing_brews opencode"
   command -v pup >/dev/null 2>&1 || missing_brews="$missing_brews pup"
@@ -62,11 +72,6 @@ if ! command -v ghostty >/dev/null 2>&1 \
   brew install --cask ghostty
 fi
 
-if ! command -v docker >/dev/null 2>&1 && command -v brew >/dev/null 2>&1; then
-  echo "  Installing OrbStack for docker-pi."
-  brew install --cask orbstack
-fi
-
-unset -f trust_homebrew_taps
+unset -f trust_homebrew_taps has_modern_bash
 
 return 0 2>/dev/null || exit 0

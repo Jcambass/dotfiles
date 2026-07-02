@@ -168,6 +168,17 @@ _agents_brew_install() {
   brew install "$@"
 }
 
+_agents_has_modern_bash() {
+  local bash_bin
+
+  for bash_bin in /opt/homebrew/bin/bash /usr/local/bin/bash bash; do
+    command -v "$bash_bin" >/dev/null 2>&1 || continue
+    "$bash_bin" -c '[ "${BASH_VERSINFO[0]}" -ge 4 ]' >/dev/null 2>&1 && return 0
+  done
+
+  return 1
+}
+
 _agents_ensure_agent_tools() {
   local packages=()
 
@@ -186,6 +197,7 @@ _agents_ensure_agent_tools() {
     command -v jq >/dev/null 2>&1 || packages+=(jq)
     command -v rg >/dev/null 2>&1 || packages+=(ripgrep)
     command -v tmux >/dev/null 2>&1 || packages+=(tmux)
+    _agents_has_modern_bash || packages+=(bash)
     command -v node >/dev/null 2>&1 || packages+=(node)
     command -v pup >/dev/null 2>&1 || packages+=(pup)
     command -v opencode >/dev/null 2>&1 || packages+=(opencode)
@@ -197,11 +209,6 @@ _agents_ensure_agent_tools() {
       brew tap manaflow-ai/cmux
       _agents_trust_homebrew_taps
       brew install --cask cmux || _agents_warn "cmux install failed; continuing"
-    fi
-
-    if ! command -v docker >/dev/null 2>&1 && _agents_ensure_homebrew; then
-      _agents_log "installing OrbStack"
-      brew install --cask orbstack || _agents_warn "OrbStack install failed; continuing"
     fi
 
     return 0
@@ -264,61 +271,6 @@ _agents_sha256_file() {
   fi
 
   return 1
-}
-
-_agents_ensure_docker_pi_image() {
-  local root dockerfile docker_context docker_bin image label expected_hash current_hash
-
-  if [ -n "${DOTFILES_SKIP_DOCKER_PI_BUILD:-}" ]; then
-    return 0
-  fi
-
-  if ! _agents_is_macos; then
-    return 0
-  fi
-
-  root="$(_agents_root)"
-  dockerfile="$root/.pi/sandbox/Dockerfile.pi"
-  [ -f "$dockerfile" ] || return 0
-
-  docker_bin="$(command -v docker 2>/dev/null || true)"
-  if [ -z "$docker_bin" ]; then
-    _agents_warn "docker unavailable; skipping docker-pi image build"
-    return 0
-  fi
-
-  if ! "$docker_bin" info >/dev/null 2>&1; then
-    _agents_warn "docker daemon unavailable; skipping docker-pi image build"
-    return 0
-  fi
-
-  expected_hash="$(_agents_sha256_file "$dockerfile" 2>/dev/null || true)"
-  if [ -z "$expected_hash" ]; then
-    _agents_warn "could not hash $dockerfile; skipping docker-pi image build"
-    return 0
-  fi
-
-  image="${PI_DOCKER_IMAGE:-pi-sandbox}"
-  label="com.jcambass.dotfiles.pi-sandbox-dockerfile-sha256"
-  current_hash="$($docker_bin image inspect "$image" --format "{{ index .Config.Labels \"$label\" }}" 2>/dev/null || true)"
-
-  if [ "$current_hash" = "$expected_hash" ]; then
-    return 0
-  fi
-
-  docker_context="$(dirname "$dockerfile")"
-  if [ -z "$current_hash" ]; then
-    _agents_log "building docker-pi image $image"
-  else
-    _agents_log "rebuilding docker-pi image $image after Dockerfile change"
-  fi
-
-  "$docker_bin" build \
-    --label "$label=$expected_hash" \
-    -t "$image" \
-    -f "$dockerfile" \
-    "$docker_context" \
-    || _agents_warn "docker-pi image build failed; continuing"
 }
 
 _agents_gh_data_dir() {
@@ -591,12 +543,6 @@ _agents_should_skip_pi_item() {
       ;;
   esac
 
-  if _agents_is_bpdev; then
-    case "$rel" in
-      extensions/remote-agent.ts) return 0 ;;
-    esac
-  fi
-
   return 1
 }
 
@@ -809,7 +755,6 @@ _agents_main() {
   _agents_link_pi_agent "$root" || failures=$((failures + 1))
   _agents_link_opencode_config "$root" || failures=$((failures + 1))
   _agents_ensure_agent_tools || failures=$((failures + 1))
-  _agents_ensure_docker_pi_image || failures=$((failures + 1))
   _agents_ensure_gh_slack || failures=$((failures + 1))
   _agents_install_or_update_opencode || failures=$((failures + 1))
   _agents_install_or_update_pi || failures=$((failures + 1))

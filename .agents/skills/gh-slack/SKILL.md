@@ -57,9 +57,7 @@ gh-slack read --details <slack-permalink> > /tmp/slack-thread.md
 
 ## Authentication and secrets
 
-`gh-slack` uses Slack cookie auth for the team in the permalink. If auth is missing or expired, report the error and ask the user to refresh Slack auth locally.
-
-When running inside `docker-pi`, a missing `/root/.config/Slack/Cookies` error usually means the session was started before Slack mounts were available. For macOS-hosted Slack, cookie mounts alone may not be enough because the Linux container cannot decrypt keychain-backed cookies. A normal relaunch of `pi` should run host Slack auth automatically and forward temporary Slack auth into the container. If `gh-slack` still fails, ask the user to refresh Slack locally or check `docker-pi doctor`; do not ask for tokens or cookies.
+`gh-slack` uses Slack cookie auth for the team in the permalink. If auth is missing or expired, report the error and ask the user to refresh Slack auth locally. Pi runs natively on macOS, so use the host `gh-slack` command directly instead of looking for container mounts or forwarded cookies.
 
 The command below prints secrets that can impersonate the user:
 

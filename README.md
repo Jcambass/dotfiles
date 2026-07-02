@@ -101,27 +101,19 @@ macOS because bpdev and Codespaces do not run the host terminal app.
 macOS, bpdev, and Codespaces are all first-class agent environments. Bootstrap
 installs the core agent toolchain automatically with Homebrew on macOS and
 `sudo apt-get` on bpdev/Codespaces: `git`, `gh`, `jq`, `ripgrep`, `tmux`,
-Node.js/npm, Pi, OpenCode, WorkIQ, and `pup`. macOS also installs cmux, Ghostty,
-and OrbStack when they are missing. bpdev and Codespaces run Pi natively; macOS
-uses the Docker-backed `docker-pi` sandbox by default.
+Node.js/npm, Pi, OpenCode, WorkIQ, and `pup`. macOS also installs Bash, cmux,
+and Ghostty when they are missing.
 
-On macOS, `docker-pi` mounts `~/.ssh` read-only, overlays a generated
-Linux-compatible SSH config inside the container, and forwards `SSH_AUTH_SOCK`
-when an agent is available. This keeps normal SSH keys, encrypted-key agent
-access, host aliases, and compatible proxy settings available to Git and SSH
-commands without committing machine-local SSH details. Set
-`PI_DOCKER_SSH_CONFIG=0` to skip the SSH mount, or `PI_DOCKER_SSH_AGENT=0` to
-skip agent forwarding.
+Pi runs natively in every supported environment. On macOS, run Pi in cmux when
+you want the cmux sidebar and split-pane status panel. Outside cmux, the `pi`
+shell function starts or attaches a small tmux session for interactive Pi when
+`tmux` is available. Short-lived commands such as `pi --list-models` run
+directly so they remain easy to pipe or script.
 
-`docker-pi` also mounts the host Slack app configuration read-only when present.
-For Slack thread reads on macOS, it fetches keychain-backed Slack auth through
-the host `gh-slack` command and passes it into the temporary container without
-printing or storing it in this repository. Bootstrap installs `gh-slack` on
-macOS. Set `PI_DOCKER_SLACK_AUTH=0` to disable that forwarding.
-
-Bootstrap builds the `docker-pi` image on macOS when it is missing or when the
-managed `.pi/sandbox/Dockerfile.pi` changes. Set `DOTFILES_SKIP_DOCKER_PI_BUILD=1`
-to skip that step.
+The managed Pi configuration is linked into `~/.pi/agent`, so changes to agents,
+prompts, settings, skills, and extensions are local files. Use Pi's `/reload`
+command after changing extensions instead of rebuilding an image or restarting a
+container.
 
 Pi is configured to use GitHub Copilot models by default. The first time you run
 it, authenticate Pi itself:
@@ -131,9 +123,8 @@ it, authenticate Pi itself:
 ```
 
 Choose GitHub Copilot and leave the Enterprise domain blank unless you need one.
-On macOS, `docker-pi` stores that auth in the `pi-agent-home` Docker volume. On
-bpdev and Codespaces, Pi stores it in `~/.pi/agent/auth.json`. If Pi says `No
-API key found for github-copilot`, run `/login`.
+Pi stores auth in `~/.pi/agent/auth.json`. If Pi says `No API key found for
+github-copilot`, run `/login`.
 
 The main file you'll want to change right off the bat is `zsh/zshrc.symlink`,
 which sets up a few paths that'll be different on your particular machine.

@@ -2,7 +2,7 @@
 # Pi status panel — runs in a cmux right split pane
 # Shows modified files, git status, and session stats
 # Rebuilds data every second and shows a single Session state indicator
-# Requires bash 4+ for associative arrays (brew install bash)
+# Requires Bash 4+ for associative arrays. Bootstrap installs Homebrew Bash on macOS.
 
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
   # Fall back to homebrew bash if available
@@ -11,7 +11,7 @@ if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
   elif [[ -x /usr/local/bin/bash ]]; then
     exec /usr/local/bin/bash "$0" "$@"
   else
-    echo "Requires bash 4+ (brew install bash)"
+    echo "Requires Bash 4+; run script/bootstrap or install Homebrew Bash with: brew install bash"
     exit 1
   fi
 fi

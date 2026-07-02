@@ -72,13 +72,10 @@ list, then fall back to the no-shared-history tree comparison only for files or
 layout changes that need local/manual mapping.
 
 At this checkpoint, the code-review PR-linked issue updates were selected for
-manual porting. The Pi sandbox/docker-pi changes were inspected and the useful
-pieces appeared already present locally: external `Dockerfile.pi`, nested Docker,
-`~/.gitconfig` read-only mount plus container-local GitHub credential helpers,
-realpath/symlink target mounts, `docker-pi doctor`, and host config path
-resolution. Do not remove local-only additions such as `@microsoft/workiq`,
-`set-clipboard`, Docker-backed macOS Pi notes, or bp-dev native Pi notes unless
-the user asks.
+manual porting. This repository now runs Pi natively on macOS, bp-dev, and
+Codespaces. Do not bring back the old macOS Pi wrapper unless the user asks.
+Preserve local-only additions such as `@microsoft/workiq`,
+`set-clipboard`, cmux/tmux status panel behavior, and bp-dev native Pi notes.
 
 ## Inspect candidate files
 
@@ -158,8 +155,8 @@ Use manual patches for local superset files. Preserve:
 - root `AGENTS.md` public-repository baseline plus local dotfiles rules
 - macOS and bp-dev as first-class environments
 - Codespaces support
-- Docker-backed Pi on macOS
-- native Pi on bp-dev and Codespaces
+- native Pi on macOS, bp-dev, and Codespaces
+- cmux and tmux status panel support
 - `.agents` and `.pi/agent` as managed dotfiles components
 - non-interactive bootstrap behavior
 - local `jcambass/` branch-prefix rules and user-facing wording

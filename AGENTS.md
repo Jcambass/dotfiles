@@ -45,8 +45,8 @@ without explicit approval.
 - Codespaces should stay supported, but it is used less often.
 - Prefer behavior that works on both macOS and bp-dev. If something only works
   in one environment, gate it explicitly and document why.
-- bp-dev should run Pi natively. macOS should keep the Docker-backed `docker-pi`
-  path. Codespaces should run Pi natively.
+- macOS, bp-dev, and Codespaces should run Pi natively.
+- macOS should prefer cmux for the richest UI, with tmux kept as a fallback.
 
 ## Bootstrap rules
 
