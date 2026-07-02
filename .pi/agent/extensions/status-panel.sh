@@ -19,7 +19,7 @@ fi
 set +e
 
 # Colors
-DIM='\033[2m'
+DIM='\033[38;5;246m'
 BOLD='\033[1m'
 RESET='\033[0m'
 GREEN='\033[32m'
@@ -28,13 +28,13 @@ BLUE='\033[34m'
 MAGENTA='\033[35m'
 CYAN='\033[36m'
 RED='\033[31m'
-GRAY='\033[90m'
+GRAY='\033[38;5;248m'
 BORDER_GRAY='\033[38;2;59;66;82m'
 
 # Soft panel palette
 SAGE_GREEN='\033[38;5;114m'
 BUTTER_YELLOW='\033[38;5;228m'
-SOFT_GRAY='\033[38;5;245m'
+SOFT_GRAY='\033[38;5;247m'
 PALE_CYAN='\033[38;5;159m'
 PALE_AMBER='\033[38;5;223m'
 PALE_ROSE='\033[38;5;217m'
@@ -196,9 +196,9 @@ status=str(g.get('status','active'))
 objective=' '.join(str(g.get('objective','')).split())
 note=' '.join(str(g.get('note','')).split())
 icons={'active':'●','paused':'◌','blocked':'▲','complete':'✓'}
-colors={'active':'\033[38;5;159m','paused':'\033[38;5;245m','blocked':'\033[38;5;223m','complete':'\033[38;5;114m'}
+colors={'active':'\033[38;5;159m','paused':'\033[38;5;247m','blocked':'\033[38;5;223m','complete':'\033[38;5;114m'}
 reset='\033[0m'
-dim='\033[2m'
+dim='\033[38;5;246m'
 co=colors.get(status,'')
 ic=icons.get(status,'●')
 wrap_width=max(8, width - 4)
@@ -271,9 +271,9 @@ import sys,json,textwrap
 width=max(10, int(sys.argv[1]))
 tasks=json.load(sys.stdin).get('tasks',[])
 icons={'pending':'○','in_progress':'▸','completed':'✓','cancelled':'✗'}
-colors={'pending':'\033[38;5;245m','in_progress':'\033[38;5;228m','completed':'\033[38;5;114m','cancelled':'\033[2m'}
+colors={'pending':'\033[38;5;247m','in_progress':'\033[38;5;228m','completed':'\033[38;5;114m','cancelled':'\033[38;5;246m'}
 reset='\033[0m'
-dim='\033[2m'
+dim='\033[38;5;246m'
 for i, t in enumerate(tasks):
     s=t['status']
     ic=icons.get(s,'?')

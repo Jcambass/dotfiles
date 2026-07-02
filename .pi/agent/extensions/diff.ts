@@ -1,22 +1,24 @@
 /**
  * Diff Extension
  *
- * /diff — interactive picker for git-changed files, opens diffs in Zed.
+ * /diff — interactive picker for git-changed files, opens diffs in VS Code Insiders.
  *   - Enter: open selected file's diff
- *   - a: open all diffs at once
+ *   - a: open all diffs sequentially
  *   - Esc: close
  *
- * /diff all — open all changed files in Zed's diff view directly (no picker).
+ * /diff vim — use Vim/vimdiff instead, with Pi's TUI suspended while Vim runs.
+ * /diff all — open all changed files directly (no picker).
+ * /diff all vim — open all changed files in Vim diff mode sequentially.
  *
- * Temp files (HEAD versions for Zed --diff) use a per-process directory
+ * Temp files (HEAD versions for diff tools) use a per-process directory
  * that's cleaned up on process exit and at the start of each invocation.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { Container, Key, matchesKey, type SelectItem, SelectList, Text } from "@earendil-works/pi-tui";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -48,6 +50,49 @@ function writeTmpFile(name: string, content: string): string {
 interface FileInfo {
 	status: string;
 	file: string;
+}
+
+type EditorMode = "code" | "vim";
+
+interface DiffArgs {
+	all: boolean;
+	editor: EditorMode;
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+function parseDiffArgs(args: string | undefined): DiffArgs {
+	const tokens = args?.trim().toLowerCase().split(/\s+/).filter(Boolean) ?? [];
+	return {
+		all: tokens.includes("all"),
+		editor: tokens.some((t) => t === "vim" || t === "vi" || t === "nvim") ? "vim" : "code",
+	};
+}
+
+function editorLabel(editor: EditorMode): string {
+	return editor === "vim" ? "Vim" : "VS Code Insiders";
+}
+
+function commandExists(command: string): boolean {
+	try {
+		execFileSync("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+const VIM_QUIT_ALL_ABBREV = 'cnoreabbrev <expr> q getcmdtype() ==# ":" && getcmdline() ==# "q" ? "qa" : "q"';
+
+function codeCommand(): string {
+	if (process.env.PI_CODE_COMMAND) return process.env.PI_CODE_COMMAND;
+	if (commandExists("code-insiders")) return "code-insiders";
+	return "code";
+}
+
+function vimArgs(...args: string[]): string[] {
+	// In vimdiff, :q closes only one split. Make :q behave like :qa for this launched Vim.
+	return ["-c", VIM_QUIT_ALL_ABBREV, ...args];
 }
 
 // ── Extension ───────────────────────────────────────────────────────
@@ -87,53 +132,10 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	async function openDiff(file: FileInfo, cwd: string): Promise<void> {
-		try {
-			if (file.status === "?" || file.status === "A") {
-				await pi.exec("zed", [file.file], { cwd });
-				return;
-			}
-			const headContent = getHeadContent(file.file, cwd);
-			const tmpFile = writeTmpFile(path.basename(file.file), headContent);
-			const r = await pi.exec("zed", ["--diff", tmpFile, file.file], { cwd });
-			if (r.code !== 0) throw new Error(`zed exited ${r.code}`);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			throw new Error(`Failed to diff ${file.file}: ${msg}`);
-		}
-	}
-
-	async function openAllDiffs(files: FileInfo[], cwd: string): Promise<{ opened: number; errors: string[] }> {
-		ensureTmpDir();
-		const args: string[] = [];
-		const errors: string[] = [];
-
-		for (const f of files) {
-			if (f.status === "D") continue; // Can't open deleted files
-			try {
-				if (f.status === "?" || f.status === "A") {
-					args.push(f.file);
-				} else {
-					const headContent = getHeadContent(f.file, cwd);
-					const tmpFile = writeTmpFile(path.basename(f.file), headContent);
-					args.push("--diff", tmpFile, f.file);
-				}
-			} catch (err) {
-				errors.push(f.file);
-			}
-		}
-
-		if (args.length > 0) {
-			await pi.exec("zed", args, { cwd });
-		}
-
-		const opened = files.filter(f => f.status !== "D").length - errors.length;
-		return { opened, errors };
-	}
-
 	pi.registerCommand("diff", {
-		description: "Show git changes and open diffs in Zed (/diff [all])",
+		description: "Show git changes and open diffs in VS Code Insiders or Vim (/diff [all] [vim])",
 		handler: async (args, ctx) => {
+			const parsed = parseDiffArgs(args);
 			const files = await getChangedFiles(ctx.cwd);
 			if (files === null) {
 				ctx.ui.notify("git status failed", "error");
@@ -144,22 +146,98 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			// /diff all — skip picker, open everything
-			if (args?.trim().toLowerCase() === "all") {
+			if (parsed.editor === "vim" && ctx.mode !== "tui") {
+				ctx.ui.notify("Vim diff mode requires Pi TUI", "error");
+				return;
+			}
+
+			const runTerminal = async (command: string, commandArgs: string[]): Promise<number> => {
+				const exitCode = await ctx.ui.custom<number | null>((tui, _theme, _kb, done) => {
+					// Stop Pi's TUI so Vim owns the terminal while it is running.
+					tui.stop();
+					process.stdout.write("\x1b[2J\x1b[H");
+
+					const result = spawnSync(command, commandArgs, {
+						cwd: ctx.cwd,
+						stdio: "inherit",
+						env: process.env,
+					});
+
+					// Restart and force a full redraw after Vim exits.
+					tui.start();
+					tui.requestRender(true);
+					done(result.status ?? 1);
+
+					return { render: () => [], invalidate: () => {} };
+				});
+
+				return exitCode ?? 1;
+			};
+
+			const openCodeDiff = async (file: FileInfo): Promise<void> => {
+				const command = codeCommand();
+				const commandArgs = file.status === "?" || file.status === "A"
+					? ["--wait", file.file]
+					: ["--wait", "--diff", writeTmpFile(path.basename(file.file), getHeadContent(file.file, ctx.cwd)), file.file];
+				const r = await pi.exec(command, commandArgs, { cwd: ctx.cwd });
+				if (r.code !== 0) throw new Error(`${command} exited ${r.code}`);
+			};
+
+			const openVimDiff = async (file: FileInfo): Promise<void> => {
+				if (file.status === "?" || file.status === "A") {
+					const r = await runTerminal("vim", vimArgs(file.file));
+					if (r !== 0) throw new Error(`vim exited ${r}`);
+					return;
+				}
+
+				const tmpFile = writeTmpFile(path.basename(file.file), getHeadContent(file.file, ctx.cwd));
+				const command = commandExists("vimdiff") ? "vimdiff" : "vim";
+				const commandArgs = command === "vimdiff" ? vimArgs(tmpFile, file.file) : vimArgs("-d", tmpFile, file.file);
+				const r = await runTerminal(command, commandArgs);
+				if (r !== 0) throw new Error(`${command} exited ${r}`);
+			};
+
+			const openDiff = async (file: FileInfo): Promise<void> => {
+				try {
+					if (parsed.editor === "vim") await openVimDiff(file);
+					else await openCodeDiff(file);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					throw new Error(`Failed to diff ${file.file}: ${msg}`);
+				}
+			};
+
+			const openAllDiffs = async (): Promise<{ opened: number; errors: string[] }> => {
 				ensureTmpDir();
-				const { opened, errors } = await openAllDiffs(files, ctx.cwd);
+				const errors: string[] = [];
+				let opened = 0;
+
+				for (const f of files) {
+					if (f.status === "D") continue; // Can't open deleted files
+					try {
+						await openDiff(f);
+						opened += 1;
+					} catch {
+						errors.push(f.file);
+					}
+				}
+
+				return { opened, errors };
+			};
+
+			// /diff all — skip picker, open everything
+			if (parsed.all) {
+				const { opened, errors } = await openAllDiffs();
 				if (errors.length > 0) {
 					ctx.ui.notify(`Opened ${opened} diff(s), ${errors.length} failed`, "warning");
 				} else {
-					ctx.ui.notify(`Opened ${opened} diff(s) in Zed`, "info");
+					ctx.ui.notify(`Opened ${opened} diff(s) in ${editorLabel(parsed.editor)}`, "info");
 				}
 				return;
 			}
 
 			if (!ctx.hasUI) {
-				// Non-interactive fallback: open all
-				ensureTmpDir();
-				await openAllDiffs(files, ctx.cwd);
+				await openAllDiffs();
 				return;
 			}
 
@@ -171,7 +249,7 @@ export default function (pi: ExtensionAPI) {
 
 				container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
 				container.addChild(new Text(
-					theme.fg("accent", theme.bold(" Diff ")) + theme.fg("muted", `${files.length} changed`),
+					theme.fg("accent", theme.bold(" Diff ")) + theme.fg("muted", `${files.length} changed • ${editorLabel(parsed.editor)}`),
 					0, 0,
 				));
 
@@ -199,7 +277,8 @@ export default function (pi: ExtensionAPI) {
 				});
 
 				selectList.onSelect = (item) => {
-					openDiff(item.value as FileInfo, ctx.cwd).catch((err) => {
+					done();
+					openDiff(item.value as FileInfo).catch((err) => {
 						ctx.ui.notify(err.message, "error");
 					});
 				};
@@ -220,16 +299,16 @@ export default function (pi: ExtensionAPI) {
 					invalidate: () => container.invalidate(),
 					handleInput: (data) => {
 						if (matchesKey(data, "a")) {
-							openAllDiffs(files, ctx.cwd).then(({ opened, errors }) => {
+							done();
+							openAllDiffs().then(({ opened, errors }) => {
 								if (errors.length > 0) {
 									ctx.ui.notify(`Opened ${opened} diff(s), ${errors.length} failed`, "warning");
 								} else {
-									ctx.ui.notify(`Opened ${opened} diff(s) in Zed`, "info");
+									ctx.ui.notify(`Opened ${opened} diff(s) in ${editorLabel(parsed.editor)}`, "info");
 								}
 							}).catch((err) => {
 								ctx.ui.notify(err.message, "error");
 							});
-							done();
 							return;
 						}
 						if (matchesKey(data, Key.left)) {

@@ -2,12 +2,15 @@
  * Files Extension
  *
  * /files command lists all files the model has read/written/edited in the active session branch,
- * coalesced by path and sorted newest first. Selecting a file opens it in VS Code.
+ * coalesced by path and sorted newest first. Selecting a file opens it in VS Code Insiders.
+ *
+ * /files vim opens selected files in Vim instead, with Pi's TUI suspended while Vim runs.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { Container, Key, matchesKey, type SelectItem, SelectList, Text } from "@earendil-works/pi-tui";
+import { execFileSync, spawnSync } from "node:child_process";
 
 interface FileEntry {
 	path: string;
@@ -16,13 +19,52 @@ interface FileEntry {
 }
 
 type FileToolName = "read" | "write" | "edit";
+type EditorMode = "code" | "vim";
+
+function commandExists(command: string): boolean {
+	try {
+		execFileSync("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+const VIM_QUIT_ALL_ABBREV = 'cnoreabbrev <expr> q getcmdtype() ==# ":" && getcmdline() ==# "q" ? "qa" : "q"';
+
+function codeCommand(): string {
+	if (process.env.PI_CODE_COMMAND) return process.env.PI_CODE_COMMAND;
+	if (commandExists("code-insiders")) return "code-insiders";
+	return "code";
+}
+
+function vimArgs(...args: string[]): string[] {
+	// Keep Vim-launched-from-Pi sessions easy to exit, including accidental splits.
+	return ["-c", VIM_QUIT_ALL_ABBREV, ...args];
+}
+
+function parseEditorMode(args: string | undefined): EditorMode {
+	const tokens = args?.trim().toLowerCase().split(/\s+/).filter(Boolean) ?? [];
+	return tokens.some((t) => t === "vim" || t === "vi" || t === "nvim") ? "vim" : "code";
+}
+
+function editorLabel(editor: EditorMode): string {
+	return editor === "vim" ? "Vim" : "VS Code Insiders";
+}
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("files", {
-		description: "Show files read/written/edited in this session",
-		handler: async (_args, ctx) => {
+		description: "Show files read/written/edited in this session (/files [vim])",
+		handler: async (args, ctx) => {
+			const editor = parseEditorMode(args);
+
 			if (!ctx.hasUI) {
 				ctx.ui.notify("No UI available", "error");
+				return;
+			}
+
+			if (editor === "vim" && ctx.mode !== "tui") {
+				ctx.ui.notify("Vim mode requires Pi TUI", "error");
 				return;
 			}
 
@@ -89,15 +131,47 @@ export default function (pi: ExtensionAPI) {
 			// Sort by most recent first
 			const files = Array.from(fileMap.values()).sort((a, b) => b.lastTimestamp - a.lastTimestamp);
 
+			const runTerminal = async (command: string, commandArgs: string[]): Promise<number> => {
+				const exitCode = await ctx.ui.custom<number | null>((tui, _theme, _kb, done) => {
+					// Stop Pi's TUI so Vim owns the terminal while it is running.
+					tui.stop();
+					process.stdout.write("\x1b[2J\x1b[H");
+
+					const result = spawnSync(command, commandArgs, {
+						cwd: ctx.cwd,
+						stdio: "inherit",
+						env: process.env,
+					});
+
+					// Restart and force a full redraw after Vim exits.
+					tui.start();
+					tui.requestRender(true);
+					done(result.status ?? 1);
+
+					return { render: () => [], invalidate: () => {} };
+				});
+
+				return exitCode ?? 1;
+			};
+
 			const openSelected = async (file: FileEntry): Promise<void> => {
 				try {
-					const r = await pi.exec("zed", [file.path], { cwd: ctx.cwd });
+					if (editor === "vim") {
+						const r = await runTerminal("vim", vimArgs(file.path));
+						if (r !== 0) {
+							ctx.ui.notify(`Failed to open ${file.path} in Vim`, "error");
+						}
+						return;
+					}
+
+					const command = codeCommand();
+					const r = await pi.exec(command, ["--wait", file.path], { cwd: ctx.cwd });
 					if (r.code !== 0) {
-						ctx.ui.notify(`Failed to open ${file.path}`, "error");
+						ctx.ui.notify(`Failed to open ${file.path} in VS Code Insiders`, "error");
 					}
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
-					ctx.ui.notify(`Failed to open ${file.path}: ${message}`, "error");
+					ctx.ui.notify(`Failed to open ${file.path} in ${editorLabel(editor)}: ${message}`, "error");
 				}
 			};
 
@@ -109,7 +183,10 @@ export default function (pi: ExtensionAPI) {
 				container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
 
 				// Title
-				container.addChild(new Text(theme.fg("accent", theme.bold(" Select file to open")), 0, 0));
+				container.addChild(new Text(
+					theme.fg("accent", theme.bold(" Select file to open")) + theme.fg("muted", ` • ${editorLabel(editor)}`),
+					0, 0,
+				));
 
 				// Build select items with colored operations
 				const items: SelectItem[] = files.map((f) => {
@@ -135,6 +212,7 @@ export default function (pi: ExtensionAPI) {
 					noMatch: (t) => theme.fg("warning", t),
 				});
 				selectList.onSelect = (item) => {
+					done();
 					void openSelected(item.value as FileEntry);
 				};
 				selectList.onCancel = () => done();
