@@ -4,8 +4,7 @@
  * Opens a right split pane in cmux or tmux showing modified files, git status,
  * diff stats, and recent commits — like OpenCode's right sidebar.
  *
- * Toggle with /status or ctrl+shift+s. Set PI_AUTO_STATUS_PANEL=1 to open it
- * automatically on session start.
+ * Toggle with /status or ctrl+shift+s.
  * Requires cmux or tmux. Child subagents can disable mux UI with
  * PI_DISABLE_MUX_UI=1 to avoid nested panels.
  */
@@ -23,11 +22,6 @@ type PanelHandle =
 
 function isMuxUiDisabled(): boolean {
 	const value = process.env.PI_DISABLE_MUX_UI?.toLowerCase();
-	return value === "1" || value === "true" || value === "yes";
-}
-
-function shouldAutoOpenPanel(): boolean {
-	const value = process.env.PI_AUTO_STATUS_PANEL?.toLowerCase();
 	return value === "1" || value === "true" || value === "yes";
 }
 
@@ -259,7 +253,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		sessionDir = getStateDir(ctx.sessionManager.getSessionFile());
-		if (shouldAutoOpenPanel() && getMuxBackend() && !panelHandle) {
+		if (getMuxBackend() && !panelHandle) {
 			togglePanel(ctx.cwd);
 		}
 	});
