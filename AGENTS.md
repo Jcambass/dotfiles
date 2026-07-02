@@ -3,6 +3,25 @@
 This repository is intended to be easy for AI agents to improve. Keep changes
 small, explicit, and safe to apply on macOS, bp-dev, and Codespaces.
 
+## Public repository boundaries
+
+This repository is public.
+
+Do not add secrets, credentials, tokens, private keys, customer data, internal
+hostnames, internal service names, company-specific runbooks, private
+documentation, or anything that depends on non-public systems.
+
+Keep examples generic. Use placeholders like `owner/repo`, `example.com`,
+`$HOME`, and `user@example.com` instead of real company, host, tenant, account,
+or machine-specific values.
+
+Before committing, scan changes for sensitive or company-specific content. If
+something is useful but private, keep it outside the repository.
+
+Existing public dotfiles names such as `bpdev` are part of this repository's
+supported environments. Do not add new private names, hostnames, or runbooks
+without explicit approval.
+
 ## Repository model
 
 - System manifests live in `systems/`. They list repository-relative topic
