@@ -77,6 +77,22 @@ function commandErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+async function openInNeovim(ctx: ExtensionCommandContext, targetPath: string): Promise<boolean | undefined> {
+	if (ctx.mode !== "tui") return undefined;
+
+	const exitCode = await ctx.ui.custom<number | null>((tui, _theme, _kb, done) => {
+		tui.stop();
+		process.stdout.write("\x1b[2J\x1b[H");
+		const result = spawnSync("nvim", [targetPath], { cwd: notesRoot(), stdio: "inherit", env: process.env });
+		tui.start();
+		tui.requestRender(true);
+		done(result.status ?? 1);
+		return { render: () => [], invalidate: () => {} };
+	});
+
+	return exitCode === 0;
+}
+
 function stripMatchingQuotes(value: string): string {
 	const trimmed = value.trim();
 	if (trimmed.length >= 2) {
@@ -414,17 +430,20 @@ export default function (pi: ExtensionAPI) {
 					case "project": {
 						const output = await runNote(pi, ["project", "new", ...parseNewArgs(rest)]);
 						commandFeedback(pi, ctx, successMessage("Created project", output));
+						if ((await openInNeovim(ctx, output)) === false) commandFeedback(pi, ctx, `Failed to open notes: ${output}`, "error");
 						return;
 					}
 					case "area": {
 						const output = await runNote(pi, ["area", "new", ...parseNewArgs(rest)]);
 						commandFeedback(pi, ctx, successMessage("Created area", output));
+						if ((await openInNeovim(ctx, output)) === false) commandFeedback(pi, ctx, `Failed to open notes: ${output}`, "error");
 						return;
 					}
 					case "resource": {
 						const title = nonEmpty(rest, "resource name");
 						const output = await runNote(pi, ["resource", "new", title]);
 						commandFeedback(pi, ctx, successMessage("Created resource", output));
+						if ((await openInNeovim(ctx, output)) === false) commandFeedback(pi, ctx, `Failed to open notes: ${output}`, "error");
 						return;
 					}
 					case "meeting": {
@@ -433,6 +452,7 @@ export default function (pi: ExtensionAPI) {
 							try {
 								const output = await runCurrentMeeting(pi, ctx, {});
 								commandFeedback(pi, ctx, successMessage("Created/reused meeting note", output));
+								if ((await openInNeovim(ctx, output)) === false) commandFeedback(pi, ctx, `Failed to open notes: ${output}`, "error");
 								return;
 							} catch {
 								if (ctx.hasUI) title = (await ctx.ui.input("Meeting title", "Title"))?.trim() || "";
@@ -446,6 +466,7 @@ export default function (pi: ExtensionAPI) {
 
 						const output = await runNote(pi, ["meeting", "--title", title, " "]);
 						commandFeedback(pi, ctx, successMessage("Created/reused meeting note", output));
+						if ((await openInNeovim(ctx, output)) === false) commandFeedback(pi, ctx, `Failed to open notes: ${output}`, "error");
 						return;
 					}
 					case "open": {
@@ -455,19 +476,10 @@ export default function (pi: ExtensionAPI) {
 							return;
 						}
 
-						const exitCode = await ctx.ui.custom<number | null>((tui, _theme, _kb, done) => {
-							tui.stop();
-							process.stdout.write("\x1b[2J\x1b[H");
-							const result = spawnSync("nvim", [targetPath], { cwd: notesRoot(), stdio: "inherit", env: process.env });
-							tui.start();
-							tui.requestRender(true);
-							done(result.status ?? 1);
-							return { render: () => [], invalidate: () => {} };
-						});
-
-						if (exitCode !== 0) {
+						const opened = await openInNeovim(ctx, targetPath);
+						if (opened === false) {
 							commandFeedback(pi, ctx, `Failed to open notes: ${targetPath}`, "error");
-						} else {
+						} else if (opened === true) {
 							commandFeedback(pi, ctx, `Opened notes: ${targetPath}`);
 						}
 						return;
