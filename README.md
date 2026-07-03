@@ -115,6 +115,12 @@ prompts, settings, skills, and extensions are local files. Use Pi's `/reload`
 command after changing extensions instead of rebuilding an image or restarting a
 container.
 
+The `common/notes` component provides the `note` CLI, spelling-tool setup, and
+Pi note-taking resources for a private Markdown notes repo at `$NOTES_ROOT`
+(default: `~/Notes`). The notes repo uses numbered PARA folders (`10 - Projects`,
+`20 - Areas`, `30 - Resources`, `40 - Archive`) with meeting notes under
+`30 - Resources/Meetings`. There is intentionally no inbox.
+
 Pi is configured to use GitHub Copilot models by default. The first time you run
 it, authenticate Pi itself:
 

@@ -1,0 +1,1066 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECTS_DIR="10 - Projects"
+AREAS_DIR="20 - Areas"
+RESOURCES_DIR="30 - Resources"
+MEETINGS_DIR="30 - Resources/Meetings"
+ARCHIVE_DIR="40 - Archive"
+TEMPLATES_DIR=".notes/templates"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  note root
+  note init
+  note project new [--prefix 10.1] <name>
+  note project list
+  note area new [--prefix 20.1] <name>
+  note area list
+  note resource new <name>
+  note resource list
+  note add project|area|resource <target> --title <title> [body...]
+  note edit project|area|resource <target> [note-file-or-query]
+  note meeting [--project <project>] [--area <area>] [body...]
+  note meeting --title <title> [--project <project>] [--area <area>] [--start <iso>] [--end <iso>] [body...]
+  note meeting <title>
+  note archive project|area|resource <target>
+  note open [path]
+  note find <query...>
+  note spell [--fix] [path...]
+  note status
+USAGE
+}
+
+fail() {
+  printf 'note: %s\n' "$*" >&2
+  exit 1
+}
+
+notes_root_input() {
+  printf '%s\n' "${NOTES_ROOT:-$HOME/Notes}"
+}
+
+ensure_root() {
+  local root
+  root="$(notes_root_input)"
+  mkdir -p "$root"
+  (cd "$root" && pwd -P)
+}
+
+notes_root() {
+  local root
+  root="$(notes_root_input)"
+  [ -d "$root" ] || fail "notes root does not exist: $root (run: note init)"
+  (cd "$root" && pwd -P)
+}
+
+rel_path() {
+  local base="$1" path="$2"
+  python3 - "$base" "$path" <<'PY'
+import os, sys
+base = os.path.realpath(sys.argv[1])
+path = os.path.realpath(sys.argv[2])
+print(os.path.relpath(path, base))
+PY
+}
+
+is_under_root() {
+  local root="$1" target="$2"
+  python3 - "$root" "$target" <<'PY'
+import os, sys
+root = os.path.realpath(sys.argv[1])
+target = os.path.realpath(sys.argv[2])
+try:
+    common = os.path.commonpath([root, target])
+except ValueError:
+    sys.exit(1)
+sys.exit(0 if common == root else 1)
+PY
+}
+
+normalize_name() {
+  python3 - "$*" <<'PY'
+import re, sys, unicodedata
+s = ' '.join(sys.argv[1:]).strip()
+s = re.sub(r'^[0-9]+(?:\.[0-9]+)*\s*-\s*', '', s)
+s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+s = re.sub(r'[^A-Za-z0-9]+', '', s).lower()
+print(s)
+PY
+}
+
+safe_filename() {
+  python3 - "$*" <<'PY'
+import re, sys
+s = ' '.join(sys.argv[1:]).strip() or 'Untitled'
+s = re.sub(r'[/:\\]+', ' - ', s)
+s = re.sub(r'[\x00-\x1f]+', ' ', s)
+s = re.sub(r'\s+', ' ', s).strip()
+s = s.strip('. ')
+print(s or 'Untitled')
+PY
+}
+
+folder_name() {
+  local prefix="" name=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --prefix)
+        shift
+        [ "$#" -gt 0 ] || fail "--prefix requires a value"
+        prefix="$1"
+        ;;
+      *)
+        if [ -n "$name" ]; then
+          name="$name $1"
+        else
+          name="$1"
+        fi
+        ;;
+    esac
+    shift || true
+  done
+  [ -n "$name" ] || fail "name is required"
+  if [ -n "$prefix" ]; then
+    printf '%s - %s\n' "$prefix" "$name"
+  else
+    printf '%s\n' "$name"
+  fi
+}
+
+category_dir() {
+  case "$1" in
+    project) printf '%s\n' "$PROJECTS_DIR" ;;
+    area) printf '%s\n' "$AREAS_DIR" ;;
+    resource) printf '%s\n' "$RESOURCES_DIR" ;;
+    *) fail "unknown category: $1" ;;
+  esac
+}
+
+archive_category_dir() {
+  case "$1" in
+    project) printf '%s\n' "Projects" ;;
+    area) printf '%s\n' "Areas" ;;
+    resource) printf '%s\n' "Resources" ;;
+    *) fail "unknown category: $1" ;;
+  esac
+}
+
+resolve_target() {
+  local category="$1" query="$2" root base exact query_norm matches count item name
+  root="$(notes_root)"
+  base="$root/$(category_dir "$category")"
+  [ -d "$base" ] || fail "missing category directory: $base (run: note init)"
+
+  exact="$base/$query"
+  if [ -d "$exact" ]; then
+    printf '%s\n' "$exact"
+    return 0
+  fi
+
+  query_norm="$(normalize_name "$query")"
+  matches=()
+  while IFS= read -r -d '' item; do
+    [ -d "$item" ] || continue
+    name="$(basename "$item")"
+    if [ "$category" = "resource" ] && [ "$name" = "Meetings" ]; then
+      continue
+    fi
+    if [ "$(normalize_name "$name")" = "$query_norm" ]; then
+      matches+=("$item")
+    fi
+  done < <(find "$base" -mindepth 1 -maxdepth 1 -type d -print0)
+
+  count="${#matches[@]}"
+  if [ "$count" -eq 1 ]; then
+    printf '%s\n' "${matches[0]}"
+    return 0
+  fi
+  if [ "$count" -gt 1 ]; then
+    printf 'note: ambiguous %s target: %s\n' "$category" "$query" >&2
+    printf 'Candidates:\n' >&2
+    for item in "${matches[@]}"; do printf '  %s\n' "$(basename "$item")" >&2; done
+    exit 1
+  fi
+
+  case "$category" in
+    project) fail "project not found: $query (create it with: note project new \"$query\")" ;;
+    area) fail "area not found: $query (create it with: note area new \"$query\")" ;;
+    resource) fail "resource not found: $query (create it with: note resource new \"$query\")" ;;
+  esac
+}
+
+today() { date +%F; }
+
+now_stamp() { date '+%Y-%m-%d %H%M'; }
+
+iso_now() { date '+%Y-%m-%dT%H:%M:%S%z'; }
+
+editor_cmd() {
+  if [ -n "${EDITOR:-}" ]; then
+    printf '%s\n' "$EDITOR"
+  elif command -v nvim >/dev/null 2>&1; then
+    printf '%s\n' nvim
+  else
+    printf '%s\n' vim
+  fi
+}
+
+open_editor() {
+  local editor
+  editor="$(editor_cmd)"
+  # shellcheck disable=SC2086
+  $editor "$@"
+}
+
+write_file_if_missing() {
+  local path="$1"
+  shift
+  if [ -e "$path" ]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$path")"
+  cat > "$path"
+}
+
+init_templates() {
+  local root="$1"
+  mkdir -p "$root/$TEMPLATES_DIR"
+
+  write_file_if_missing "$root/$TEMPLATES_DIR/project.md" <<'EOF'
+---
+title: {{title}}
+type: project
+status: active
+created: {{date}}
+updated: {{date}}
+tags: []
+---
+
+# {{title}}
+
+## Notes
+EOF
+
+  write_file_if_missing "$root/$TEMPLATES_DIR/area.md" <<'EOF'
+---
+title: {{title}}
+type: area
+status: active
+created: {{date}}
+updated: {{date}}
+tags: []
+---
+
+# {{title}}
+
+## Notes
+EOF
+
+  write_file_if_missing "$root/$TEMPLATES_DIR/resource.md" <<'EOF'
+---
+title: {{title}}
+type: resource
+status: active
+created: {{date}}
+updated: {{date}}
+tags: []
+---
+
+# {{title}}
+
+## Notes
+EOF
+
+  write_file_if_missing "$root/$TEMPLATES_DIR/project-note.md" <<'EOF'
+---
+title: {{title}}
+type: note
+parent_type: project
+parent: {{parent}}
+created: {{date}}
+updated: {{date}}
+tags: []
+---
+
+# {{title}}
+
+{{body}}
+EOF
+
+  write_file_if_missing "$root/$TEMPLATES_DIR/area-note.md" <<'EOF'
+---
+title: {{title}}
+type: note
+parent_type: area
+parent: {{parent}}
+created: {{date}}
+updated: {{date}}
+tags: []
+---
+
+# {{title}}
+
+{{body}}
+EOF
+
+  write_file_if_missing "$root/$TEMPLATES_DIR/resource-note.md" <<'EOF'
+---
+title: {{title}}
+type: note
+parent_type: resource
+parent: {{parent}}
+created: {{date}}
+updated: {{date}}
+tags: []
+---
+
+# {{title}}
+
+{{body}}
+EOF
+
+  write_file_if_missing "$root/$TEMPLATES_DIR/meeting.md" <<'EOF'
+---
+title: {{title}}
+type: meeting
+created: {{date}}
+updated: {{date}}
+meeting_start: {{meeting_start}}
+meeting_end: {{meeting_end}}
+attendees: []
+project: {{project}}
+area: {{area}}
+source: {{source}}
+tags: []
+---
+
+# {{title}}
+
+## Attendees
+
+## Notes
+
+{{body}}
+
+## Decisions
+
+## Follow-ups
+EOF
+}
+
+init_root() {
+  local root
+  root="$(ensure_root)"
+  mkdir -p \
+    "$root/$PROJECTS_DIR" \
+    "$root/$AREAS_DIR" \
+    "$root/$RESOURCES_DIR/Meetings" \
+    "$root/$ARCHIVE_DIR/Projects" \
+    "$root/$ARCHIVE_DIR/Areas" \
+    "$root/$ARCHIVE_DIR/Resources"
+
+  touch \
+    "$root/$PROJECTS_DIR/.gitkeep" \
+    "$root/$AREAS_DIR/.gitkeep" \
+    "$root/$RESOURCES_DIR/.gitkeep" \
+    "$root/$RESOURCES_DIR/Meetings/.gitkeep" \
+    "$root/$ARCHIVE_DIR/.gitkeep"
+
+  init_templates "$root"
+
+  write_file_if_missing "$root/.gitignore" <<'EOF'
+.DS_Store
+*.swp
+*.swo
+*~
+.tmp/
+tmp/
+.obsidian/workspace*
+EOF
+
+  write_file_if_missing "$root/.gitattributes" <<'EOF'
+*.md text eol=lf
+*.txt text eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+EOF
+
+  write_file_if_missing "$root/.codespellrc" <<'EOF'
+[codespell]
+skip = .git,*.png,*.jpg,*.jpeg,*.gif,*.pdf
+ignore-words-list =
+EOF
+
+  write_file_if_missing "$root/README.md" <<'EOF'
+# Notes
+
+Private Markdown notes using a lightweight PARA layout.
+
+## Structure
+
+- `10 - Projects/` — active outcomes with a finish line.
+- `20 - Areas/` — ongoing responsibilities.
+- `30 - Resources/` — reference material and reusable knowledge.
+- `30 - Resources/Meetings/` — meeting notes.
+- `40 - Archive/` — inactive projects, areas, and resources moved here explicitly.
+
+There is intentionally no inbox. Create notes where they belong.
+
+## Commands
+
+```bash
+note project new "Reflections 2026"
+note project new --prefix 10.2 "Observability"
+note area new "Mentoring"
+note resource new "Reading List"
+note add project "Reflections 2026" --title "Feedback List"
+note add area "Mentoring" --title "Coaching notes"
+note add resource "Reading List" --title "Book notes"
+note meeting
+note meeting --title "Fortnightly Sync"
+note archive project "Old Project"
+note find "keyword"
+note spell
+note status
+```
+
+Do not push or publish this repository unless you intend to share private notes.
+EOF
+
+  if [ ! -d "$root/.git" ]; then
+    git -C "$root" init >/dev/null
+  fi
+
+  printf '%s\n' "$root"
+}
+
+render_template() {
+  local template="$1" title="$2" parent_type="$3" parent="$4" body="$5" start="$6" end="$7" project="$8" area="$9" source="${10}"
+  python3 - "$template" "$title" "$parent_type" "$parent" "$body" "$start" "$end" "$project" "$area" "$source" <<'PY'
+import sys, datetime
+path, title, parent_type, parent, body, start, end, project, area, source = sys.argv[1:]
+today = datetime.date.today().isoformat()
+text = open(path, encoding='utf-8').read()
+replacements = {
+    '{{title}}': title,
+    '{{date}}': today,
+    '{{parent_type}}': parent_type,
+    '{{parent}}': parent,
+    '{{body}}': body,
+    '{{meeting_start}}': start,
+    '{{meeting_end}}': end,
+    '{{project}}': project,
+    '{{area}}': area,
+    '{{source}}': source,
+}
+for key, value in replacements.items():
+    text = text.replace(key, value)
+print(text, end='')
+PY
+}
+
+create_index() {
+  local category="$1" name="$2" dir="$3" root template title path
+  root="$(notes_root)"
+  title="$name"
+  case "$category" in
+    project) template="$root/$TEMPLATES_DIR/project.md" ;;
+    area) template="$root/$TEMPLATES_DIR/area.md" ;;
+    resource) template="$root/$TEMPLATES_DIR/resource.md" ;;
+    *) fail "unknown category: $category" ;;
+  esac
+  path="$dir/index.md"
+  if [ ! -e "$path" ]; then
+    render_template "$template" "$title" "$category" "" "" "" "" "" "" "manual" > "$path"
+  fi
+}
+
+new_item() {
+  local category="$1"
+  shift
+  init_root >/dev/null
+  local root base name dir clean_name
+  root="$(notes_root)"
+  name="$(folder_name "$@")"
+  clean_name="$(normalize_name "$name")"
+  [ -n "$clean_name" ] || fail "invalid name: $name"
+  if [ "$category" = "resource" ] && [ "$(normalize_name "$name")" = "meetings" ]; then
+    fail "resource name 'Meetings' is reserved for meeting notes"
+  fi
+  base="$root/$(category_dir "$category")"
+  dir="$base/$name"
+  mkdir -p "$dir"
+  create_index "$category" "$name" "$dir"
+  printf '%s\n' "$dir"
+}
+
+list_items() {
+  local category="$1" root base item
+  root="$(notes_root)"
+  base="$root/$(category_dir "$category")"
+  [ -d "$base" ] || return 0
+  while IFS= read -r -d '' item; do
+    [ "$category" = "resource" ] && [ "$(basename "$item")" = "Meetings" ] && continue
+    printf '%s\n' "$(basename "$item")"
+  done < <(find "$base" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
+}
+
+parse_title_and_body() {
+  local title_var="$1" body_var="$2"
+  shift 2
+  local parsed_title="" parsed_body="" body_args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --title)
+        shift
+        [ "$#" -gt 0 ] || fail "--title requires a value"
+        parsed_title="$1"
+        ;;
+      --)
+        shift
+        body_args+=("$@")
+        break
+        ;;
+      *) body_args+=("$1") ;;
+    esac
+    shift || true
+  done
+  [ -n "$parsed_title" ] || fail "--title is required"
+  if [ "${#body_args[@]}" -gt 0 ]; then
+    parsed_body="${body_args[*]}"
+  elif [ ! -t 0 ]; then
+    parsed_body="$(cat)"
+  fi
+  printf -v "$title_var" '%s' "$parsed_title"
+  printf -v "$body_var" '%s' "$parsed_body"
+}
+
+unique_path() {
+  local dir="$1" filename="$2" path base ext n
+  path="$dir/$filename"
+  if [ ! -e "$path" ]; then
+    printf '%s\n' "$path"
+    return 0
+  fi
+  base="${filename%.*}"
+  ext=".${filename##*.}"
+  n=2
+  while [ -e "$dir/$base $n$ext" ]; do n=$((n + 1)); done
+  printf '%s\n' "$dir/$base $n$ext"
+}
+
+meeting_existing_path() {
+  local dir="$1" title="$2" start="$3" end="$4" created_date
+  created_date="$(today)"
+  python3 - "$dir" "$title" "$start" "$end" "$created_date" <<'PY'
+import pathlib, re, sys
+
+dir = pathlib.Path(sys.argv[1])
+title, start, end, created_date = sys.argv[2:6]
+
+def frontmatter(text):
+    if not text.startswith('---\n'):
+        return ''
+    marker = text.find('\n---\n', 4)
+    return text[4:marker] if marker != -1 else ''
+
+def value(fm, key):
+    match = re.search(rf'^{re.escape(key)}:\s*(.*)$', fm, re.MULTILINE)
+    if not match:
+        return ''
+    return match.group(1).strip().strip('"\'')
+
+def norm(text):
+    return re.sub(r'\s+', ' ', text).strip()
+
+for path in sorted(dir.glob('*.md')):
+    try:
+        fm = frontmatter(path.read_text(encoding='utf-8'))
+    except Exception:
+        continue
+    if norm(value(fm, 'title')) != norm(title):
+        continue
+
+    if start or end:
+        if start and value(fm, 'meeting_start') != start:
+            continue
+        if end and value(fm, 'meeting_end') != end:
+            continue
+        print(path)
+        break
+
+    if value(fm, 'created') == created_date or path.name.startswith(f'{created_date} '):
+        print(path)
+        break
+PY
+}
+
+add_note() {
+  local category="$1" target="$2"
+  shift 2
+  init_root >/dev/null
+  local title body target_dir root template filename path parent_name
+  parse_title_and_body title body "$@"
+  target_dir="$(resolve_target "$category" "$target")"
+  root="$(notes_root)"
+  parent_name="$(basename "$target_dir")"
+  template="$root/$TEMPLATES_DIR/$category-note.md"
+  filename="$(today) - $(safe_filename "$title").md"
+  path="$(unique_path "$target_dir" "$filename")"
+  render_template "$template" "$title" "$category" "$parent_name" "$body" "" "" "" "" "manual" > "$path"
+  if [ -z "$body" ]; then open_editor "$path"; fi
+  printf '%s\n' "$path"
+}
+
+edit_note() {
+  local category="$1" target="$2" query="${3:-}" target_dir match matches
+  target_dir="$(resolve_target "$category" "$target")"
+  if [ -z "$query" ]; then
+    open_editor "$target_dir"
+    return 0
+  fi
+  if [ -e "$target_dir/$query" ]; then
+    open_editor "$target_dir/$query"
+    return 0
+  fi
+  matches=()
+  while IFS= read -r -d '' match; do
+    if printf '%s\n' "$(basename "$match")" | grep -iq -- "$query"; then
+      matches+=("$match")
+    fi
+  done < <(find "$target_dir" -maxdepth 1 -type f -name '*.md' -print0)
+  case "${#matches[@]}" in
+    0) fail "no matching note for: $query" ;;
+    1) open_editor "${matches[0]}" ;;
+    *)
+      printf 'Multiple matches:\n' >&2
+      for match in "${matches[@]}"; do printf '  %s\n' "$(basename "$match")" >&2; done
+      fail "be more specific"
+      ;;
+  esac
+}
+
+meeting_note() {
+  init_root >/dev/null
+  local title="" project="" area="" start="" end="" body_args=() body="" source="manual"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --title) shift; [ "$#" -gt 0 ] || fail "--title requires a value"; title="$1" ;;
+      --project) shift; [ "$#" -gt 0 ] || fail "--project requires a value"; project="$1" ;;
+      --area) shift; [ "$#" -gt 0 ] || fail "--area requires a value"; area="$1" ;;
+      --start) shift; [ "$#" -gt 0 ] || fail "--start requires a value"; start="$1" ;;
+      --end) shift; [ "$#" -gt 0 ] || fail "--end requires a value"; end="$1" ;;
+      --) shift; body_args+=("$@"); break ;;
+      *) body_args+=("$1") ;;
+    esac
+    shift || true
+  done
+  [ -n "$title" ] || fail "--title is required"
+  if [ -n "$project" ]; then resolve_target project "$project" >/dev/null; fi
+  if [ -n "$area" ]; then resolve_target area "$area" >/dev/null; fi
+  if [ "${#body_args[@]}" -gt 0 ]; then body="${body_args[*]}"; elif [ ! -t 0 ]; then body="$(cat)"; fi
+  local root dir template filename path existing
+  root="$(notes_root)"
+  dir="$root/$MEETINGS_DIR"
+  mkdir -p "$dir"
+  existing="$(meeting_existing_path "$dir" "$title" "$start" "$end")"
+  if [ -n "$existing" ]; then
+    printf '%s\n' "$existing"
+    return 0
+  fi
+  template="$root/$TEMPLATES_DIR/meeting.md"
+  filename="$(now_stamp) - $(safe_filename "$title").md"
+  path="$(unique_path "$dir" "$filename")"
+  render_template "$template" "$title" "meeting" "" "$body" "$start" "$end" "$project" "$area" "$source" > "$path"
+  if [ -z "$body" ]; then open_editor "$path"; fi
+  printf '%s\n' "$path"
+}
+
+meeting_current() {
+  init_root >/dev/null
+  command -v workiq >/dev/null 2>&1 || fail "workiq not found; use: note meeting --title \"Meeting title\""
+
+  local project="" area="" choose_subject="" choose_start="" body_args=() body="" arg
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --choose-subject)
+        shift
+        [ "$#" -gt 0 ] || fail "--choose-subject requires a value"
+        choose_subject="$1"
+        ;;
+      --choose-start)
+        shift
+        [ "$#" -gt 0 ] || fail "--choose-start requires a value"
+        choose_start="$1"
+        ;;
+      --project)
+        shift
+        [ "$#" -gt 0 ] || fail "--project requires a value"
+        project="$1"
+        ;;
+      --area)
+        shift
+        [ "$#" -gt 0 ] || fail "--area requires a value"
+        area="$1"
+        ;;
+      --)
+        shift
+        body_args+=("$@")
+        break
+        ;;
+      *) body_args+=("$1") ;;
+    esac
+    shift || true
+  done
+
+  if [ -n "$project" ]; then resolve_target project "$project" >/dev/null; fi
+  if [ -n "$area" ]; then resolve_target area "$area" >/dev/null; fi
+  if [ "${#body_args[@]}" -gt 0 ]; then
+    body="${body_args[*]}"
+  elif [ ! -t 0 ]; then
+    body="$(cat)"
+  fi
+
+  local url events_file selected_file title start end web_link attendees_json path body_for_create should_open=0
+  local meeting_args=()
+  url="$(python3 - <<'PY'
+from datetime import datetime, timedelta
+from urllib.parse import quote
+now = datetime.now().astimezone()
+start = (now - timedelta(minutes=15)).isoformat(timespec='seconds')
+end = (now + timedelta(minutes=90)).isoformat(timespec='seconds')
+select = 'subject,start,end,organizer,attendees,webLink,isCancelled,showAs,isAllDay'
+print(f'/me/calendarView?startDateTime={quote(start)}&endDateTime={quote(end)}&$select={select}&$orderby=start/dateTime')
+PY
+)"
+  events_file="$(mktemp)"
+  selected_file="$(mktemp)"
+  trap "rm -f '$events_file' '$selected_file'" EXIT
+
+  if ! workiq fetch -u "$url" > "$events_file"; then
+    fail "could not fetch calendar events with workiq; use: note meeting --title \"Meeting title\""
+  fi
+
+  python3 - "$events_file" "$choose_subject" "$choose_start" > "$selected_file" <<'PY'
+import json, sys
+from datetime import datetime, timezone, timedelta
+
+path, choose_subject, choose_start = sys.argv[1:4]
+try:
+    data = json.load(open(path, encoding='utf-8'))
+except Exception as exc:
+    print(f'ERROR\tinvalid WorkIQ calendar response: {exc}')
+    sys.exit(0)
+
+now = datetime.now(timezone.utc)
+active = []
+soon = []
+
+for event in data.get('value', []):
+    if event.get('isCancelled') or event.get('isAllDay'):
+        continue
+    if str(event.get('showAs', '')).lower() == 'free':
+        continue
+
+    start_info = event.get('start') or {}
+    end_info = event.get('end') or {}
+    start_text = start_info.get('dateTime')
+    end_text = end_info.get('dateTime')
+    if not start_text or not end_text:
+        continue
+
+    def parse_graph_time(text, tz_name):
+        text = text.split('.')[0]
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            # Graph commonly returns UTC here for /me/calendarView in WorkIQ.
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    try:
+        start_dt = parse_graph_time(start_text, start_info.get('timeZone'))
+        end_dt = parse_graph_time(end_text, end_info.get('timeZone'))
+    except Exception:
+        continue
+
+    subject = (event.get('subject') or 'Untitled meeting').strip() or 'Untitled meeting'
+    attendees = []
+    for attendee in event.get('attendees') or []:
+        email = (attendee.get('emailAddress') or {})
+        name = (email.get('name') or email.get('address') or '').strip()
+        if name:
+            attendees.append(name)
+
+    item = {
+        'subject': subject,
+        'start': start_dt.astimezone().isoformat(timespec='seconds'),
+        'end': end_dt.astimezone().isoformat(timespec='seconds'),
+        'webLink': event.get('webLink') or '',
+        'attendees': attendees,
+    }
+
+    if start_dt <= now <= end_dt:
+        active.append(item)
+    elif now < start_dt <= now + timedelta(minutes=15):
+        soon.append(item)
+
+candidates = active or soon
+if choose_subject:
+    selected = [item for item in candidates if item['subject'] == choose_subject and (not choose_start or item['start'] == choose_start)]
+    if len(selected) == 1:
+        print('OK\t' + json.dumps(selected[0], ensure_ascii=False))
+    elif not selected:
+        print('ERROR\tSelected meeting is no longer current/imminent. Use: note meeting --title "Meeting title"')
+    else:
+        print('ERROR\tSelected meeting is ambiguous. Use: note meeting --title "Meeting title"')
+elif not candidates:
+    print('ERROR\tNo current or imminent busy meeting found. Use: note meeting --title "Meeting title"')
+elif len(candidates) > 1:
+    print('MULTIPLE\t' + json.dumps(candidates, ensure_ascii=False))
+else:
+    item = candidates[0]
+    print('OK\t' + json.dumps(item, ensure_ascii=False))
+PY
+
+  IFS=$'\t' read -r status payload < "$selected_file" || true
+  if [ "$status" = "MULTIPLE" ]; then
+    if [ -t 0 ] && [ -t 1 ]; then
+      python3 - "$payload" >&2 <<'PY'
+import json, sys
+items = json.loads(sys.argv[1])
+print('Multiple current/imminent meetings found:')
+for i, item in enumerate(items, 1):
+    print(f'  {i}. {item["start"]}  {item["subject"]}')
+PY
+      printf 'Select meeting number: ' >&2
+      read -r choice
+      payload="$(python3 - "$payload" "$choice" <<'PY'
+import json, sys
+items = json.loads(sys.argv[1])
+try:
+    idx = int(sys.argv[2]) - 1
+    if idx < 0 or idx >= len(items):
+        raise ValueError
+except Exception:
+    print('')
+    sys.exit(1)
+print(json.dumps(items[idx], ensure_ascii=False))
+PY
+)" || fail "invalid meeting selection"
+      status="OK"
+    else
+      python3 - "$payload" >&2 <<'PY'
+import json, sys
+items = json.loads(sys.argv[1])
+print('ERROR\tMultiple current/imminent meetings found; use: note meeting --title "Meeting title"')
+for item in items:
+    print(f'CANDIDATE\t{item["start"]}\t{item["subject"]}')
+PY
+      exit 1
+    fi
+  fi
+  if [ "$status" != "OK" ]; then
+    cat "$selected_file" >&2
+    exit 1
+  fi
+
+  title="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["subject"])' "$payload")"
+  start="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["start"])' "$payload")"
+  end="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["end"])' "$payload")"
+  web_link="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("webLink", ""))' "$payload")"
+  attendees_json="$(python3 -c 'import json,sys; print(json.dumps(json.loads(sys.argv[1]).get("attendees", [])))' "$payload")"
+
+  body_for_create="$body"
+  if [ -z "$body_for_create" ]; then
+    body_for_create=" "
+    [ -t 1 ] && should_open=1
+  fi
+
+  meeting_args=(--title "$title")
+  if [ -n "$project" ]; then meeting_args+=(--project "$project"); fi
+  if [ -n "$area" ]; then meeting_args+=(--area "$area"); fi
+  meeting_args+=(--start "$start" --end "$end" "$body_for_create")
+  path="$(meeting_note "${meeting_args[@]}")"
+
+  python3 - "$path" "$attendees_json" "$web_link" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+attendees = json.loads(sys.argv[2])
+web_link = sys.argv[3]
+text = path.read_text(encoding='utf-8')
+if 'source: manual' in text:
+    text = text.replace('source: manual', 'source: calendar', 1)
+if 'attendees: []' in text:
+    if attendees:
+        rendered = 'attendees:\n' + ''.join(f'  - {name}\n' for name in attendees)
+    else:
+        rendered = 'attendees: []'
+    text = text.replace('attendees: []', rendered.rstrip(), 1)
+if attendees and '## Attendees\n\n## Notes' in text:
+    rendered_body = '## Attendees\n\n' + ''.join(f'- {name}\n' for name in attendees) + '\n## Notes'
+    text = text.replace('## Attendees\n\n## Notes', rendered_body, 1)
+if web_link and 'calendar_link:' not in text:
+    text = text.replace('source: calendar', f'source: calendar\ncalendar_link: {web_link}', 1)
+path.write_text(text, encoding='utf-8')
+PY
+
+  if [ "$should_open" -eq 1 ]; then open_editor "$path"; fi
+  printf '%s\n' "$path"
+}
+
+cmd_meeting() {
+  local sub="${1:-}" arg has_title=0
+  if [ "$#" -eq 0 ]; then
+    meeting_current
+    return 0
+  fi
+  if [ "$sub" = "current" ]; then
+    shift
+    meeting_current "$@"
+    return 0
+  fi
+  if [ "${sub#-}" = "$sub" ]; then
+    meeting_note --title "$*"
+    return 0
+  fi
+  for arg in "$@"; do
+    if [ "$arg" = "--title" ]; then
+      has_title=1
+      break
+    fi
+  done
+  if [ "$has_title" -eq 1 ]; then
+    meeting_note "$@"
+  else
+    meeting_current "$@"
+  fi
+}
+
+archive_item() {
+  local category="$1" target="$2" root src dest_dir dest
+  root="$(notes_root)"
+  src="$(resolve_target "$category" "$target")"
+  dest_dir="$root/$ARCHIVE_DIR/$(archive_category_dir "$category")"
+  mkdir -p "$dest_dir"
+  dest="$dest_dir/$(basename "$src")"
+  [ ! -e "$dest" ] || fail "archive destination already exists: $dest"
+  mv "$src" "$dest"
+  if [ -f "$dest/index.md" ]; then
+    python3 - "$dest/index.md" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+s = p.read_text(encoding='utf-8')
+s = s.replace('status: active', 'status: archived', 1)
+p.write_text(s, encoding='utf-8')
+PY
+  fi
+  printf '%s\n' "$dest"
+}
+
+open_path() {
+  local root target
+  root="$(notes_root)"
+  if [ "$#" -eq 0 ]; then
+    target="$root"
+  else
+    target="$1"
+    case "$target" in
+      /*) ;;
+      *) target="$root/$target" ;;
+    esac
+  fi
+  [ -e "$target" ] || fail "path not found: $target"
+  is_under_root "$root" "$target" || fail "refusing to open path outside notes root: $target"
+  open_editor "$target"
+}
+
+spell_notes() {
+  local fix=0 root args=()
+  root="$(notes_root)"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --fix) fix=1 ;;
+      *) args+=("$1") ;;
+    esac
+    shift
+  done
+  command -v codespell >/dev/null 2>&1 || fail "codespell not found; run dotfiles bootstrap/install or install codespell"
+  if [ "${#args[@]}" -eq 0 ]; then args=("$root"); fi
+  if [ "$fix" -eq 1 ]; then
+    codespell -w "${args[@]}"
+    printf 'note: inspect changes with: git -C %q diff\n' "$root" >&2
+  else
+    codespell "${args[@]}"
+  fi
+}
+
+cmd_project() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    new) new_item project "$@" ;;
+    list) list_items project ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+cmd_area() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    new) new_item area "$@" ;;
+    list) list_items area ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+cmd_resource() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    new) new_item resource "$@" ;;
+    list) list_items resource ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+main() {
+  local cmd="${1:-}"
+  [ -n "$cmd" ] || { usage; exit 2; }
+  shift || true
+  case "$cmd" in
+    root) notes_root_input ;;
+    init) init_root ;;
+    project) cmd_project "$@" ;;
+    area) cmd_area "$@" ;;
+    resource) cmd_resource "$@" ;;
+    add)
+      [ "$#" -ge 2 ] || { usage; exit 2; }
+      local category="$1" target="$2"; shift 2
+      case "$category" in project|area|resource) add_note "$category" "$target" "$@" ;; *) fail "add target must be project, area, or resource" ;; esac
+      ;;
+    edit)
+      [ "$#" -ge 2 ] || { usage; exit 2; }
+      local category="$1" target="$2" query="${3:-}"; shift 2 || true
+      case "$category" in project|area|resource) edit_note "$category" "$target" "$query" ;; *) fail "edit target must be project, area, or resource" ;; esac
+      ;;
+    meeting) cmd_meeting "$@" ;;
+    archive)
+      [ "$#" -eq 2 ] || { usage; exit 2; }
+      case "$1" in project|area|resource) archive_item "$1" "$2" ;; *) fail "archive target must be project, area, or resource" ;; esac
+      ;;
+    open) open_path "$@" ;;
+    find)
+      [ "$#" -gt 0 ] || fail "find requires a query"
+      rg -n --hidden --glob '*.md' "$*" "$(notes_root)"
+      ;;
+    spell) spell_notes "$@" ;;
+    status) git -C "$(notes_root)" status --short ;;
+    -h|--help|help) usage ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+main "$@"

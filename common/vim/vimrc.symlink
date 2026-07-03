@@ -22,20 +22,32 @@ set title       " 2008-04-07: to display filename in titlebar of terminal
 syntax on
 filetype on
 
-" Install plug.vim
-let data_dir = has('nvim') ? stdpath('data') . '/site' : '~/.vim'
-if empty(glob(data_dir . '/autoload/plug.vim'))
-  silent execute '!curl -fLo '.data_dir.'/autoload/plug.vim --create-dirs  https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim'
-  autocmd VimEnter * PlugInstall --sync | source $MYVIMRC
-endif
+" Spelling for prose files.
+" Useful keys: ]s next, [s previous, z= suggestions, zg add good word, zw mark wrong.
+augroup prose_spelling
+  autocmd!
+  autocmd FileType markdown,text,gitcommit setlocal spell spelllang=en_us wrap linebreak
+augroup END
 
 if has('nvim')
-  plug#begin()
+lua << EOF
+vim.pack.add({
+  'https://github.com/github/copilot.vim',
+  'https://github.com/nvim-treesitter/nvim-treesitter',
+  'https://github.com/MeanderingProgrammer/render-markdown.nvim',
+})
 
-  " List your plugins here
-  Plug 'github/copilot.vim'
+pcall(function()
+  require('nvim-treesitter.configs').setup({
+    ensure_installed = { 'markdown', 'markdown_inline', 'yaml' },
+    highlight = { enable = true },
+  })
+end)
 
-  call plug#end()
+pcall(function()
+  require('render-markdown').setup({})
+end)
+EOF
 endif
 
 

@@ -4,5 +4,6 @@ common/bash
 common/git
 common/tmux
 common/vim
+common/notes
 common/zsh
 bpdev/vscode-extensions
