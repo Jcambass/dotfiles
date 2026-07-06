@@ -251,6 +251,47 @@ function resolveNotePath(target: string): string {
 	return targetPath;
 }
 
+async function selectNoteSubcommand(ctx: ExtensionCommandContext): Promise<string | undefined> {
+	if (ctx.mode !== "tui") return undefined;
+	const labels = [
+		"Open notes or a note file",
+		"Create/reuse meeting note",
+		"Create project",
+		"Create area",
+		"Create resource",
+	];
+	const selected = await ctx.ui.select("Note action", labels);
+	switch (selected) {
+		case "Open notes or a note file":
+			return "open";
+		case "Create/reuse meeting note":
+			return "meeting";
+		case "Create project":
+			return "project";
+		case "Create area":
+			return "area";
+		case "Create resource":
+			return "resource";
+		default:
+			return undefined;
+	}
+}
+
+async function selectOpenTarget(ctx: ExtensionCommandContext): Promise<string | undefined> {
+	if (ctx.mode !== "tui") return undefined;
+	const items = openCompletions();
+	const labels = items.map((item) => (item.description ? `${item.label} — ${item.description}` : item.label));
+	const selected = await ctx.ui.select("Open note", labels);
+	if (!selected) return undefined;
+	const item = items[labels.indexOf(selected)];
+	return item?.value.replace(/^open\s*/, "").trim();
+}
+
+async function inputIfMissing(ctx: ExtensionCommandContext, value: string, title: string): Promise<string> {
+	if (value.trim() || ctx.mode !== "tui") return value.trim();
+	return (await ctx.ui.input(title, "Name"))?.trim() || "";
+}
+
 function parseNewArgs(args: string): string[] {
 	const trimmed = args.trim();
 	if (!trimmed) throw new Error("name is required");
@@ -422,25 +463,36 @@ export default function (pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			const trimmed = args.trim();
 			const match = trimmed.match(/^(\S+)(?:\s+([\s\S]*))?$/);
-			const subcommand = match?.[1] || "";
-			const rest = match?.[2]?.trim() || "";
+			let subcommand = match?.[1] || "";
+			let rest = match?.[2]?.trim() || "";
+
+			if (!subcommand) {
+				const selectedSubcommand = await selectNoteSubcommand(ctx);
+				if (!selectedSubcommand) {
+					commandFeedback(pi, ctx, "Usage: /note meeting [title] | /note project [--prefix 10.2] <name> | /note area [--prefix 20.2] <name> | /note resource <name> | /note open [path]", "warning");
+					return;
+				}
+				subcommand = selectedSubcommand;
+			}
 
 			try {
 				switch (subcommand) {
 					case "project": {
-						const output = await runNote(pi, ["project", "new", ...parseNewArgs(rest)]);
+						const projectArgs = await inputIfMissing(ctx, rest, "Project name");
+						const output = await runNote(pi, ["project", "new", ...parseNewArgs(projectArgs)]);
 						commandFeedback(pi, ctx, successMessage("Created project", output));
 						if ((await openInNeovim(ctx, output)) === false) commandFeedback(pi, ctx, `Failed to open notes: ${output}`, "error");
 						return;
 					}
 					case "area": {
-						const output = await runNote(pi, ["area", "new", ...parseNewArgs(rest)]);
+						const areaArgs = await inputIfMissing(ctx, rest, "Area name");
+						const output = await runNote(pi, ["area", "new", ...parseNewArgs(areaArgs)]);
 						commandFeedback(pi, ctx, successMessage("Created area", output));
 						if ((await openInNeovim(ctx, output)) === false) commandFeedback(pi, ctx, `Failed to open notes: ${output}`, "error");
 						return;
 					}
 					case "resource": {
-						const title = nonEmpty(rest, "resource name");
+						const title = nonEmpty(await inputIfMissing(ctx, rest, "Resource name"), "resource name");
 						const output = await runNote(pi, ["resource", "new", title]);
 						commandFeedback(pi, ctx, successMessage("Created resource", output));
 						if ((await openInNeovim(ctx, output)) === false) commandFeedback(pi, ctx, `Failed to open notes: ${output}`, "error");
@@ -470,7 +522,8 @@ export default function (pi: ExtensionAPI) {
 						return;
 					}
 					case "open": {
-						const targetPath = resolveNotePath(rest);
+						const targetArg = rest || (await selectOpenTarget(ctx)) || "";
+						const targetPath = resolveNotePath(targetArg);
 						if (ctx.mode !== "tui") {
 							commandFeedback(pi, ctx, `Notes: ${targetPath}`);
 							return;
