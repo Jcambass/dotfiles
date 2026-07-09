@@ -106,6 +106,16 @@ _apps_backup_path() {
   printf '%s\n' "${backup}.$(date +%Y%m%d%H%M%S)"
 }
 
+_apps_enable_cmux_beta_features() {
+  command -v defaults >/dev/null 2>&1 || return 0
+
+  defaults write com.cmuxterm.app rightSidebar.beta.feed.enabled -bool true || _apps_warn "could not enable cmux Feed beta"
+  defaults write com.cmuxterm.app rightSidebar.beta.dock.enabled -bool true || _apps_warn "could not enable cmux Dock beta"
+  defaults write com.cmuxterm.app extensions.beta.enabled -bool true || _apps_warn "could not enable cmux Extensions beta"
+  defaults write com.cmuxterm.app customSidebars.beta.enabled -bool true || _apps_warn "could not enable cmux Custom Sidebars beta"
+  defaults write com.cmuxterm.app remoteTmux.beta.enabled -bool true || _apps_warn "could not enable cmux Remote tmux beta"
+}
+
 _apps_link_file() {
   local src="$1" dest="$2" backup
 
@@ -146,6 +156,8 @@ _apps_main() {
 
   if [ "$system" = "macos" ]; then
     _apps_link_file "$root/common/apps/config/ghostty/config" "$HOME/.config/ghostty/config" || failures=$((failures + 1))
+    _apps_link_file "$root/common/apps/config/cmux/dock.json" "$HOME/.config/cmux/dock.json" || failures=$((failures + 1))
+    _apps_enable_cmux_beta_features
   fi
 
   if [ "$failures" -gt 0 ]; then

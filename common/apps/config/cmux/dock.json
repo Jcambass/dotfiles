@@ -1,0 +1,11 @@
+{
+  "controls": [
+    {
+      "id": "pi",
+      "title": "Pi",
+      "command": "$HOME/.pi/agent/extensions/status-dock.sh",
+      "cwd": ".",
+      "height": 740
+    }
+  ]
+}

@@ -17,6 +17,7 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const attentionNotificationEvent = "notify:attention";
+const sessionNameChangedEvent = "session-name:changed";
 
 interface AttentionNotification {
 	title: string;
@@ -69,10 +70,12 @@ function getStateDir(sessionFile: string | undefined): string {
 }
 
 interface SessionStats {
+	sessionName: string;
 	model: string;
 	contextTokens: number | null;
 	contextWindow: number;
 	contextPercent: number | null;
+	compacted: boolean;
 	inputTokens: number;
 	outputTokens: number;
 	cacheRead: number;
@@ -213,6 +216,9 @@ export default function (pi: ExtensionAPI) {
 			cmuxLog(event.logMessage, event.level ?? "warning");
 		}
 	});
+	pi.events.on(sessionNameChangedEvent, () => {
+		flushStats();
+	});
 
 	let turnCount = 0;
 	let toolsThisTurn = 0;
@@ -222,6 +228,7 @@ export default function (pi: ExtensionAPI) {
 	let filesEdited = new Set<string>();
 	let filesCreated = new Set<string>();
 	let commandsRun = 0;
+	let compacted = false;
 
 	let activeSubagents = 0;
 	let completedSubagents = 0;
@@ -239,11 +246,13 @@ export default function (pi: ExtensionAPI) {
 
 	function flushStats(): void {
 		const usage = currentCtx?.getContextUsage?.();
-		writeStats({
+		const stats: SessionStats = {
+			sessionName: pi.getSessionName() ?? "",
 			model: currentModel,
 			contextTokens: usage?.tokens ?? null,
 			contextWindow: usage?.contextWindow ?? 0,
 			contextPercent: usage?.percent ?? null,
+			compacted,
 			inputTokens: totalInputTokens,
 			outputTokens: totalOutputTokens,
 			cacheRead: totalCacheRead,
@@ -257,7 +266,8 @@ export default function (pi: ExtensionAPI) {
 			commandsRun,
 			subagent: subagentInfo,
 			updatedAt: Date.now(),
-		});
+		};
+		writeStats(stats);
 	}
 
 	function buildSummary(elapsed: string): string {
@@ -288,6 +298,14 @@ export default function (pi: ExtensionAPI) {
 		return `${parts.join(", ")} (${elapsed}s)`;
 	}
 
+	function branchHasCompaction(ctx: any): boolean {
+		try {
+			return ctx.sessionManager.getBranch().some((entry: any) => entry.type === "compaction");
+		} catch {
+			return false;
+		}
+	}
+
 	// ── session lifecycle ────────────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -306,6 +324,7 @@ export default function (pi: ExtensionAPI) {
 		filesEdited = new Set();
 		filesCreated = new Set();
 		commandsRun = 0;
+		compacted = branchHasCompaction(ctx);
 		agentState = "idle";
 		subagentInfo = null;
 
@@ -336,6 +355,7 @@ export default function (pi: ExtensionAPI) {
 		cmuxLog("Session ended");
 		agentState = "idle";
 		flushStats();
+		currentCtx = null;
 	});
 
 	pi.on("session_switch", async (event, ctx) => {
@@ -352,6 +372,7 @@ export default function (pi: ExtensionAPI) {
 		filesEdited = new Set();
 		filesCreated = new Set();
 		commandsRun = 0;
+		compacted = branchHasCompaction(ctx);
 		errorsThisLoop = 0;
 		agentState = "idle";
 		subagentInfo = null;
@@ -376,11 +397,19 @@ export default function (pi: ExtensionAPI) {
 		flushStats();
 	});
 
+	pi.on("session_tree", async (_event, ctx) => {
+		currentCtx = ctx;
+		compacted = branchHasCompaction(ctx);
+		flushStats();
+	});
+
 	// ── compaction ───────────────────────────────────────────────────────
 
 	pi.on("session_compact", async (event) => {
 		const source = event.fromExtension ? "custom" : "auto";
+		compacted = true;
 		cmuxLog(`Context compacted (${source})`, "warning");
+		flushStats();
 	});
 
 	// ── model changes ────────────────────────────────────────────────────

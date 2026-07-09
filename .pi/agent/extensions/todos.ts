@@ -15,7 +15,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, matchesKey } from "@earendil-works/pi-tui";
 import { Type, type Static } from "@sinclair/typebox";
-import { writeFileSync, accessSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { execFile } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -23,8 +23,6 @@ import * as path from "node:path";
 // ── Shared state file (read by status-panel.sh) ─────────────────────
 
 let todosFile = "";
-const panelStateFile = path.join(os.tmpdir(), `pi-${process.pid}-status-panel.json`);
-
 function getStateDir(sessionFile: string | undefined): string {
 	if (sessionFile) {
 		return path.dirname(sessionFile);
@@ -45,34 +43,6 @@ function flushTodos(state: TodoState): void {
 			tasks: state.tasks,
 		}), "utf-8");
 	} catch {}
-}
-
-// ── cmux detection ───────────────────────────────────────────────────────
-
-function isCmux(): boolean {
-	if (process.env.CMUX_WORKSPACE_ID) return true;
-	try {
-		const sockPath = process.env.CMUX_SOCKET_PATH
-			?? `${process.env.HOME}/Library/Application Support/cmux/cmux.sock`;
-		accessSync(sockPath);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-function isTmux(): boolean {
-	return !!process.env.TMUX && !!process.env.TMUX_PANE;
-}
-
-function isTmuxStatusPanelOpen(): boolean {
-	if (!isTmux()) return false;
-	try {
-		accessSync(panelStateFile);
-		return true;
-	} catch {
-		return false;
-	}
 }
 
 // ── cmux sidebar metadata ───────────────────────────────────────────
@@ -174,24 +144,8 @@ const GoalReadParams = Type.Object({});
 export default function (pi: ExtensionAPI) {
 	let state: TodoState = { tasks: [] };
 	let currentCtx: ExtensionContext | null = null;
-	let lastWidgetSuppressed: boolean | null = null;
-	let panelPoll: ReturnType<typeof setInterval> | null = null;
 
 	// ── State reconstruction from session ───────────────────────────
-
-	const shouldSuppressWidget = (): boolean => isCmux() || isTmuxStatusPanelOpen();
-
-	const ensurePanelPolling = () => {
-		if (panelPoll) return;
-		panelPoll = setInterval(() => {
-			if (!currentCtx) return;
-			const suppressed = shouldSuppressWidget();
-			if (suppressed !== lastWidgetSuppressed) {
-				updateWidget(currentCtx);
-			}
-		}, 500);
-		panelPoll.unref?.();
-	};
 
 	const applyStateSnapshot = (snapshot: TodoState | undefined) => {
 		if (!snapshot) return;
@@ -201,7 +155,6 @@ export default function (pi: ExtensionAPI) {
 
 	const reconstructState = (ctx: ExtensionContext) => {
 		currentCtx = ctx;
-		ensurePanelPolling();
 		state = { tasks: [] };
 
 		for (const entry of ctx.sessionManager.getBranch()) {
@@ -255,16 +208,6 @@ export default function (pi: ExtensionAPI) {
 		flushTodos(state);
 		cmuxSetTaskStatus(state.tasks);
 
-		const suppressWidget = shouldSuppressWidget();
-		lastWidgetSuppressed = suppressWidget;
-
-		// In cmux, and in tmux while the right status panel is open, work state lives
-		// in the side panel instead of the horizontal editor widget.
-		if (suppressWidget) {
-			ctx.ui.setWidget("todos", []);
-			return;
-		}
-
 		if (!state.goal && state.tasks.length === 0) {
 			ctx.ui.setWidget("todos", []);
 			return;
@@ -284,6 +227,9 @@ export default function (pi: ExtensionAPI) {
 
 			const bar = progressBar(done, total, 20);
 			lines.push(`${bar} ${done}/${total}${active ? ` │ ▸ ${active.title}` : ""}`);
+			for (const task of state.tasks) {
+				lines.push(formatTaskWidgetLine(task));
+			}
 		}
 
 		ctx.ui.setWidget("todos", lines);
@@ -292,6 +238,10 @@ export default function (pi: ExtensionAPI) {
 	function progressBar(done: number, total: number, width: number): string {
 		const filled = Math.round((done / total) * width);
 		return "█".repeat(filled) + "░".repeat(width - filled);
+	}
+
+	function formatTaskWidgetLine(task: Task): string {
+		return `${statusIcon(task.status)} ${task.title}`;
 	}
 
 	// ── todowrite tool ──────────────────────────────────────────────
