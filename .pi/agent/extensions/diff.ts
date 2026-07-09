@@ -3,12 +3,12 @@
  *
  * /diff — interactive picker for git-changed files, opens diffs in VS Code Insiders.
  *   - Enter: open selected file's diff
- *   - a: open all diffs sequentially
+ *   - a: open all diffs
  *   - Esc: close
  *
  * /diff vim — use Vim/vimdiff instead, with Pi's TUI suspended while Vim runs.
  * /diff all — open all changed files directly (no picker).
- * /diff all vim — open all changed files in Vim diff mode sequentially.
+ * /diff all vim — open all changed files in Vim diff mode.
  *
  * Temp files (HEAD versions for diff tools) use a per-process directory
  * that's cleaned up on process exit and at the start of each invocation.
@@ -21,6 +21,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
+import { editorLabel, openCodeDiffs, openCodeProjectFiles, type EditorMode, vimArgs } from "./lib/editor.js";
 
 // ── Temp file management ────────────────────────────────────────────
 
@@ -52,8 +53,6 @@ interface FileInfo {
 	file: string;
 }
 
-type EditorMode = "code" | "vim";
-
 interface DiffArgs {
 	all: boolean;
 	editor: EditorMode;
@@ -69,10 +68,6 @@ function parseDiffArgs(args: string | undefined): DiffArgs {
 	};
 }
 
-function editorLabel(editor: EditorMode): string {
-	return editor === "vim" ? "Vim" : "VS Code Insiders";
-}
-
 function commandExists(command: string): boolean {
 	try {
 		execFileSync("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" });
@@ -80,19 +75,6 @@ function commandExists(command: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-const VIM_QUIT_ALL_ABBREV = 'cnoreabbrev <expr> q getcmdtype() ==# ":" && getcmdline() ==# "q" ? "qa" : "q"';
-
-function codeCommand(): string {
-	if (process.env.PI_CODE_COMMAND) return process.env.PI_CODE_COMMAND;
-	if (commandExists("code-insiders")) return "code-insiders";
-	return "code";
-}
-
-function vimArgs(...args: string[]): string[] {
-	// In vimdiff, :q closes only one split. Make :q behave like :qa for this launched Vim.
-	return ["-c", VIM_QUIT_ALL_ABBREV, ...args];
 }
 
 // ── Extension ───────────────────────────────────────────────────────
@@ -175,12 +157,11 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			const openCodeDiff = async (file: FileInfo): Promise<void> => {
-				const command = codeCommand();
-				const commandArgs = file.status === "?" || file.status === "A"
-					? ["--wait", file.file]
-					: ["--wait", "--diff", writeTmpFile(path.basename(file.file), getHeadContent(file.file, ctx.cwd)), file.file];
-				const r = await pi.exec(command, commandArgs, { cwd: ctx.cwd });
-				if (r.code !== 0) throw new Error(`${command} exited ${r.code}`);
+				if (file.status === "?" || file.status === "A") {
+					await openCodeProjectFiles(pi, ctx.cwd, [file.file]);
+					return;
+				}
+				await openCodeDiffs(pi, ctx.cwd, [{ before: writeTmpFile(path.basename(file.file), getHeadContent(file.file, ctx.cwd)), after: file.file }]);
 			};
 
 			const openVimDiff = async (file: FileInfo): Promise<void> => {
@@ -207,7 +188,24 @@ export default function (pi: ExtensionAPI) {
 				}
 			};
 
-			const openAllDiffs = async (): Promise<{ opened: number; errors: string[] }> => {
+			const openAllCodeDiffs = async (): Promise<{ opened: number; errors: string[] }> => {
+				ensureTmpDir();
+				const openable = files.filter((f) => f.status !== "D"); // Can't open deleted files
+				const plainFiles = openable.filter((f) => f.status === "?" || f.status === "A").map((f) => f.file);
+				const diffs = openable
+					.filter((f) => f.status !== "?" && f.status !== "A")
+					.map((f) => ({ before: writeTmpFile(path.basename(f.file), getHeadContent(f.file, ctx.cwd)), after: f.file }));
+
+				try {
+					if (plainFiles.length > 0) await openCodeProjectFiles(pi, ctx.cwd, plainFiles);
+					if (diffs.length > 0) await openCodeDiffs(pi, ctx.cwd, diffs);
+					return { opened: openable.length, errors: [] };
+				} catch {
+					return { opened: 0, errors: openable.map((f) => f.file) };
+				}
+			};
+
+			const openAllVimDiffs = async (): Promise<{ opened: number; errors: string[] }> => {
 				ensureTmpDir();
 				const errors: string[] = [];
 				let opened = 0;
@@ -215,7 +213,7 @@ export default function (pi: ExtensionAPI) {
 				for (const f of files) {
 					if (f.status === "D") continue; // Can't open deleted files
 					try {
-						await openDiff(f);
+						await openVimDiff(f);
 						opened += 1;
 					} catch {
 						errors.push(f.file);
@@ -223,6 +221,10 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				return { opened, errors };
+			};
+
+			const openAllDiffs = async (): Promise<{ opened: number; errors: string[] }> => {
+				return parsed.editor === "vim" ? openAllVimDiffs() : openAllCodeDiffs();
 			};
 
 			// /diff all — skip picker, open everything

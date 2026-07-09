@@ -10,6 +10,8 @@
 import { execFileSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+const sessionNameChangedEvent = "session-name:changed";
+
 function syncTmuxSessionName(name: string | undefined): void {
 	if (!process.env.TMUX || !process.env.TMUX_PANE) return;
 
@@ -34,6 +36,7 @@ export default function (pi: ExtensionAPI) {
 			if (name) {
 				pi.setSessionName(name);
 				syncTmuxSessionName(name);
+				pi.events.emit(sessionNameChangedEvent, { name });
 				ctx.ui.notify(`Session named: ${name}`, "info");
 			} else {
 				const current = pi.getSessionName();

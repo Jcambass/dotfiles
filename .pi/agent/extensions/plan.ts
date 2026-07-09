@@ -1,6 +1,7 @@
 /**
  * /plan command — Create structured implementation plans at the current worktree's .pi/plan.md.
  *
+ * Show:       /plan show — display the current plan inline
  * With args:  /plan <task> — analyze codebase and plan for the task
  * Without:    /plan — formalize the plan discussed in conversation
  */
@@ -95,10 +96,28 @@ What we're trying to achieve and why.
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("plan", {
-		description: "Create an implementation plan: /plan [task] — writes worktree-local .pi/plan.md",
+		description: "Create or show an implementation plan: /plan [show|task] — writes worktree-local .pi/plan.md",
 		handler: async (args, ctx) => {
 			const planPath = getPlanPath(ctx.cwd);
 			const task = args?.trim();
+
+			if (task === "show" || task === "view") {
+				const existingPlan = findPlanFile(ctx.cwd);
+				if (!existingPlan) {
+					ctx.ui.notify(`No plan found. Expected ${planPath}`, "warning");
+					return;
+				}
+
+				const content = fs.readFileSync(existingPlan, "utf8");
+				pi.sendMessage({
+					customType: "plan-show",
+					content: `Plan: ${existingPlan}\n\n${content}`,
+					display: true,
+					details: { path: existingPlan },
+				});
+				return;
+			}
+
 			await ensurePlanIgnored(pi, ctx.cwd);
 
 			const existingPlan = findPlanFile(ctx.cwd);

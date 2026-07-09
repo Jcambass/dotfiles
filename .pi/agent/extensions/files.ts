@@ -3,6 +3,7 @@
  *
  * /files command lists all files the model has read/written/edited in the active session branch,
  * coalesced by path and sorted newest first. Selecting a file opens it in VS Code Insiders.
+ * Press `a` to open all files at once.
  *
  * /files vim opens selected files in Vim instead, with Pi's TUI suspended while Vim runs.
  */
@@ -10,7 +11,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { Container, Key, matchesKey, type SelectItem, SelectList, Text } from "@earendil-works/pi-tui";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { editorLabel, openCodeProjectFiles, type EditorMode, vimArgs } from "./lib/editor.js";
 
 interface FileEntry {
 	path: string;
@@ -19,37 +21,10 @@ interface FileEntry {
 }
 
 type FileToolName = "read" | "write" | "edit";
-type EditorMode = "code" | "vim";
-
-function commandExists(command: string): boolean {
-	try {
-		execFileSync("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" });
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-const VIM_QUIT_ALL_ABBREV = 'cnoreabbrev <expr> q getcmdtype() ==# ":" && getcmdline() ==# "q" ? "qa" : "q"';
-
-function codeCommand(): string {
-	if (process.env.PI_CODE_COMMAND) return process.env.PI_CODE_COMMAND;
-	if (commandExists("code-insiders")) return "code-insiders";
-	return "code";
-}
-
-function vimArgs(...args: string[]): string[] {
-	// Keep Vim-launched-from-Pi sessions easy to exit, including accidental splits.
-	return ["-c", VIM_QUIT_ALL_ABBREV, ...args];
-}
 
 function parseEditorMode(args: string | undefined): EditorMode {
 	const tokens = args?.trim().toLowerCase().split(/\s+/).filter(Boolean) ?? [];
 	return tokens.some((t) => t === "vim" || t === "vi" || t === "nvim") ? "vim" : "code";
-}
-
-function editorLabel(editor: EditorMode): string {
-	return editor === "vim" ? "Vim" : "VS Code Insiders";
 }
 
 export default function (pi: ExtensionAPI) {
@@ -154,25 +129,25 @@ export default function (pi: ExtensionAPI) {
 				return exitCode ?? 1;
 			};
 
-			const openSelected = async (file: FileEntry): Promise<void> => {
+			const openFiles = async (selectedFiles: FileEntry[]): Promise<void> => {
+				const paths = selectedFiles.map((file) => file.path);
 				try {
 					if (editor === "vim") {
-						const r = await runTerminal("vim", vimArgs(file.path));
-						if (r !== 0) {
-							ctx.ui.notify(`Failed to open ${file.path} in Vim`, "error");
-						}
+						const r = await runTerminal("vim", vimArgs(...paths));
+						if (r !== 0) ctx.ui.notify(`Failed to open ${paths.length} file(s) in Vim`, "error");
 						return;
 					}
 
-					const command = codeCommand();
-					const r = await pi.exec(command, ["--wait", file.path], { cwd: ctx.cwd });
-					if (r.code !== 0) {
-						ctx.ui.notify(`Failed to open ${file.path} in VS Code Insiders`, "error");
-					}
+					await openCodeProjectFiles(pi, ctx.cwd, paths);
+					ctx.ui.notify(`Opened ${paths.length} file(s) in VS Code Insiders`, "info");
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
-					ctx.ui.notify(`Failed to open ${file.path} in ${editorLabel(editor)}: ${message}`, "error");
+					ctx.ui.notify(`Failed to open ${paths.length} file(s) in ${editorLabel(editor)}: ${message}`, "error");
 				}
+			};
+
+			const openSelected = (file: FileEntry): void => {
+				void openFiles([file]);
 			};
 
 			// Show file picker with SelectList
@@ -223,7 +198,7 @@ export default function (pi: ExtensionAPI) {
 
 				// Help text
 				container.addChild(
-					new Text(theme.fg("dim", " ↑↓ navigate • ←→ page • enter open • esc close"), 0, 0),
+					new Text(theme.fg("dim", " ↑↓ navigate • ←→ page • enter open • a open all • esc close"), 0, 0),
 				);
 
 				// Bottom border
@@ -233,6 +208,12 @@ export default function (pi: ExtensionAPI) {
 					render: (w) => container.render(w),
 					invalidate: () => container.invalidate(),
 					handleInput: (data) => {
+						if (matchesKey(data, "a")) {
+							done();
+							void openFiles(files);
+							return;
+						}
+
 						// Add paging with left/right
 						if (matchesKey(data, Key.left)) {
 							// Page up - clamp to 0
