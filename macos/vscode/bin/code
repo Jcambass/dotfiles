@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+if command -v code-insiders >/dev/null 2>&1; then
+  exec code-insiders "$@"
+fi
+
+app_cli="/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code"
+if [ -x "$app_cli" ]; then
+  exec "$app_cli" "$@"
+fi
+
+printf '%s\n' "code-insiders not found. Install the VS Code Insiders shell command or app." >&2
+exit 127
