@@ -105,10 +105,24 @@ Node.js/npm, Pi, OpenCode, WorkIQ, and `pup`. macOS also installs Bash, cmux,
 and Ghostty when they are missing.
 
 Pi runs natively in every supported environment. On macOS, run Pi in cmux when
-you want the cmux sidebar and split-pane status panel. Outside cmux, the `pi`
-shell function starts or attaches a small tmux session for interactive Pi when
-`tmux` is available. Short-lived commands such as `pi --list-models` run
-directly so they remain easy to pipe or script.
+you want the cmux sidebar, the built-in Feed, and the custom Pi Dock status
+view. Outside cmux, the `pi` shell function starts or attaches a small tmux
+session for interactive Pi when `tmux` is available. Short-lived commands such
+as `pi --list-models` run directly so they remain easy to pipe or script.
+
+macOS bootstrap enables cmux's built-in Feed and Dock beta features. The managed
+Dock keeps a `Pi` status control for Session, Plan, Goal, Tasks, and Git. The
+built-in Feed is separate from Dock; open it with `cmux right-sidebar set feed`
+or the right-sidebar Feed tab. Bootstrap installs the Pi cmux hook when `cmux`
+and `pi` are available, which lets Pi telemetry and session data show up in
+Feed. According to cmux's hook documentation, Pi currently sends
+`tool_execution_start` and `tool_execution_end` telemetry and supports session
+restore there; it is not a replacement for Pi's own approval UI.
+
+To connect every supported agent CLI to Feed, run `cmux hooks setup --yes`
+manually. Bootstrap only installs the Pi hook by default because all-agent setup
+updates other agent configurations. `cmux feed clear` resets local Feed history
+and is not part of setup.
 
 The managed Pi configuration is linked into `~/.pi/agent`, so changes to agents,
 prompts, settings, skills, and extensions are local files. Use Pi's `/reload`

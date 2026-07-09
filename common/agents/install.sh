@@ -682,6 +682,37 @@ _agents_install_or_update_pi() {
     || _agents_warn "Pi install failed; continuing"
 }
 
+_agents_setup_cmux_pi_hooks() {
+  if ! _agents_is_macos; then
+    return 0
+  fi
+
+  if [ -n "${DOTFILES_SKIP_CMUX_HOOKS:-}" ]; then
+    _agents_log "skipping cmux Pi hook setup because DOTFILES_SKIP_CMUX_HOOKS is set"
+    return 0
+  fi
+
+  if ! command -v cmux >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! command -v pi >/dev/null 2>&1; then
+    return 0
+  fi
+
+  _agents_log "setting up cmux Pi hooks"
+  if cmux hooks setup --agent pi --yes >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if cmux hooks pi install --yes >/dev/null 2>&1; then
+    return 0
+  fi
+
+  _agents_warn "cmux Pi hook setup failed; continuing"
+  return 0
+}
+
 _agents_install_or_update_workiq() {
   local npm_prefix="${NPM_CONFIG_PREFIX:-$HOME/.local}"
 
@@ -758,6 +789,7 @@ _agents_main() {
   _agents_ensure_gh_slack || failures=$((failures + 1))
   _agents_install_or_update_opencode || failures=$((failures + 1))
   _agents_install_or_update_pi || failures=$((failures + 1))
+  _agents_setup_cmux_pi_hooks || failures=$((failures + 1))
   _agents_install_or_update_workiq || failures=$((failures + 1))
 
   if [ "$failures" -gt 0 ]; then
