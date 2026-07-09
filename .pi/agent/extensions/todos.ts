@@ -202,47 +202,13 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	// ── Widget ──────────────────────────────────────────────────────
+	// ── Dock/status state ───────────────────────────────────────────
 
 	const updateWidget = (ctx: ExtensionContext) => {
 		flushTodos(state);
 		cmuxSetTaskStatus(state.tasks);
-
-		if (!state.goal && state.tasks.length === 0) {
-			ctx.ui.setWidget("todos", []);
-			return;
-		}
-
-		const lines: string[] = [];
-		if (state.goal) {
-			lines.push(formatGoalLine(state.goal));
-		}
-
-		if (state.tasks.length > 0) {
-			const completed = state.tasks.filter((t) => t.status === "completed").length;
-			const cancelled = state.tasks.filter((t) => t.status === "cancelled").length;
-			const total = state.tasks.length;
-			const active = state.tasks.find((t) => t.status === "in_progress");
-			const done = completed + cancelled;
-
-			const bar = progressBar(done, total, 20);
-			lines.push(`${bar} ${done}/${total}${active ? ` │ ▸ ${active.title}` : ""}`);
-			for (const task of state.tasks) {
-				lines.push(formatTaskWidgetLine(task));
-			}
-		}
-
-		ctx.ui.setWidget("todos", lines);
+		ctx.ui.setWidget("todos", []);
 	};
-
-	function progressBar(done: number, total: number, width: number): string {
-		const filled = Math.round((done / total) * width);
-		return "█".repeat(filled) + "░".repeat(width - filled);
-	}
-
-	function formatTaskWidgetLine(task: Task): string {
-		return `${statusIcon(task.status)} ${task.title}`;
-	}
 
 	// ── todowrite tool ──────────────────────────────────────────────
 
