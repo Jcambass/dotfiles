@@ -51,6 +51,16 @@ Stable, hand-curated voice target for writing on the user's behalf — the defau
 - Use code, commands, tables, or bullets when they make the explanation easier to scan.
 - Avoid pretending the conclusion was obvious from the start.
 
+## Reader handoff, especially AI-assisted drafts
+
+- AI-assisted drafting is fine, but human-facing prose needs a final reader-focused pass before it is posted or sent.
+- Do not publish generated working notes while context is still being gathered, assumptions are being corrected, or the point is still forming.
+- If a correction, clarification, or narrowed conclusion follows shortly after, prefer editing the original comment or draft when the venue allows it instead of making the reader reconstruct the history.
+- Length is not the problem. Long comments or explanations are fine when the detail matters. The problem is unclear flow, filler, metadata-dense text, or links carrying the explanation.
+- Links should support the explanation, not replace it. The reader should understand the point, the relationship between artifacts, and the ask without opening every link.
+- For related-work explanations, tell the story: what each piece is, why it exists, how it roughly works, where important state or configuration is persisted, how the pieces relate, and what implication or open question follows.
+- Frame feedback on AI-assisted output as reader-experience feedback, not as judgment about the tools or process someone used.
+
 ## Collaboration and credit
 
 - Credit people when their contribution materially shaped the work.
