@@ -87,13 +87,14 @@ Delete these:
 7. "Not only X but also Y." Just say both things plainly.
 8. Grand closing takeaway. Let examples speak.
 9. Lists of abstract qualities like "Leadership, Communication, Technical excellence." Show, do not label.
-10. Metadata-heavy link dumps where PR titles, issue references, and implementation snippets carry the meaning instead of the prose. Explain the story in text; links should support it.
+10. Metadata-heavy link dumps where PR titles, issue references, and implementation snippets carry the meaning instead of the prose. Explain the story in text; links should support it. In bullets, use one link per artifact and do not repeat the same URL in that bullet.
 11. Identical problem/action/result mirror. Vary the structure.
 
 ## What to do instead
 
 - Be specific. Every sentence needs a name, number, link, date, or concrete detail, or it is filler. Never invent details.
 - Lead with outcomes: what shipped or changed, then how.
+- When comparing multiple linked artifacts, prefer a short bullet list if it makes the relationship easier to scan. Each bullet should say what the artifact is and why it matters.
 - Use the user's real words from their PRs/comments over a polished rewrite.
 - Mix sentence lengths. Short for punch, long for context.
 - Show, do not label. Describe what was done, not "I demonstrated leadership."

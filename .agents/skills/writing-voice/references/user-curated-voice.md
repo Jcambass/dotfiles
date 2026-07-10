@@ -58,6 +58,8 @@ Stable, hand-curated voice target for writing on the user's behalf — the defau
 - If a correction, clarification, or narrowed conclusion follows shortly after, prefer editing the original comment or draft when the venue allows it instead of making the reader reconstruct the history.
 - Length is not the problem. Long comments or explanations are fine when the detail matters. The problem is unclear flow, filler, metadata-dense text, or links carrying the explanation.
 - Links should support the explanation, not replace it. The reader should understand the point, the relationship between artifacts, and the ask without opening every link.
+- When several PRs, issues, documents, or comments are part of the point, use a short `- ` list when it makes the relationship easier to scan. Put one artifact per bullet and explain what it is or why it matters in the same bullet.
+- Avoid repeating the same URL inside one bullet or sentence. Link the artifact once, then refer to it by name or role, such as “the broker PR” or “that follow-up”.
 - For related-work explanations, tell the story: what each piece is, why it exists, how it roughly works, where important state or configuration is persisted, how the pieces relate, and what implication or open question follows.
 - Frame feedback on AI-assisted output as reader-experience feedback, not as judgment about the tools or process someone used.
 
