@@ -12,7 +12,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { Container, Key, matchesKey, type SelectItem, SelectList, Text } from "@earendil-works/pi-tui";
 import { spawnSync } from "node:child_process";
-import { editorLabel, openCodeProjectFiles, type EditorMode, vimArgs } from "./lib/editor.js";
+import { absoluteFrom, editorLabel, openCodeProjectFiles, projectRoot, type EditorMode, vimArgs } from "./lib/editor.js";
 
 interface FileEntry {
 	path: string;
@@ -106,6 +106,8 @@ export default function (pi: ExtensionAPI) {
 			// Sort by most recent first
 			const files = Array.from(fileMap.values()).sort((a, b) => b.lastTimestamp - a.lastTimestamp);
 
+			const root = await projectRoot(pi, ctx.cwd);
+
 			const runTerminal = async (command: string, commandArgs: string[]): Promise<number> => {
 				const exitCode = await ctx.ui.custom<number | null>((tui, _theme, _kb, done) => {
 					// Stop Pi's TUI so Vim owns the terminal while it is running.
@@ -113,7 +115,7 @@ export default function (pi: ExtensionAPI) {
 					process.stdout.write("\x1b[2J\x1b[H");
 
 					const result = spawnSync(command, commandArgs, {
-						cwd: ctx.cwd,
+						cwd: root,
 						stdio: "inherit",
 						env: process.env,
 					});
@@ -130,7 +132,7 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			const openFiles = async (selectedFiles: FileEntry[]): Promise<void> => {
-				const paths = selectedFiles.map((file) => file.path);
+				const paths = selectedFiles.map((file) => absoluteFrom(ctx.cwd, file.path, root));
 				try {
 					if (editor === "vim") {
 						const r = await runTerminal("vim", vimArgs(...paths));

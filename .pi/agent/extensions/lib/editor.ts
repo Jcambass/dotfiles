@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import * as path from "node:path";
 
 export type EditorMode = "code" | "vim";
@@ -30,8 +31,13 @@ export function vimArgs(...args: string[]): string[] {
 	return ["-c", VIM_QUIT_ALL_ABBREV, ...args];
 }
 
-export function absoluteFrom(cwd: string, filePath: string): string {
-	return path.isAbsolute(filePath) ? filePath : path.resolve(cwd, filePath);
+export function absoluteFrom(cwd: string, filePath: string, root = cwd): string {
+	if (path.isAbsolute(filePath)) return filePath;
+
+	const cwdPath = path.resolve(cwd, filePath);
+	if (existsSync(cwdPath)) return cwdPath;
+
+	return path.resolve(root, filePath);
 }
 
 export async function projectRoot(pi: ExtensionAPI, cwd: string): Promise<string> {
@@ -43,7 +49,7 @@ export async function projectRoot(pi: ExtensionAPI, cwd: string): Promise<string
 export async function openCodeProjectFiles(pi: ExtensionAPI, cwd: string, files: string[]): Promise<void> {
 	const command = codeCommand();
 	const root = await projectRoot(pi, cwd);
-	const absoluteFiles = files.map((file) => absoluteFrom(cwd, file));
+	const absoluteFiles = files.map((file) => absoluteFrom(cwd, file, root));
 	const result = await pi.exec(command, ["--reuse-window", root, ...absoluteFiles], { cwd: root });
 	if (result.code !== 0) throw new Error(`${command} exited ${result.code}`);
 }
@@ -55,7 +61,7 @@ export async function openCodeDiffs(pi: ExtensionAPI, cwd: string, diffs: Array<
 	if (openRoot.code !== 0) throw new Error(`${command} exited ${openRoot.code}`);
 
 	for (const diff of diffs) {
-		const result = await pi.exec(command, ["--reuse-window", "--diff", diff.before, absoluteFrom(cwd, diff.after)], { cwd: root });
+		const result = await pi.exec(command, ["--reuse-window", "--diff", diff.before, absoluteFrom(cwd, diff.after, root)], { cwd: root });
 		if (result.code !== 0) throw new Error(`${command} exited ${result.code}`);
 	}
 }

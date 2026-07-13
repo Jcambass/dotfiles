@@ -21,7 +21,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
-import { editorLabel, openCodeDiffs, openCodeProjectFiles, type EditorMode, vimArgs } from "./lib/editor.js";
+import { absoluteFrom, editorLabel, openCodeDiffs, openCodeProjectFiles, projectRoot, type EditorMode, vimArgs } from "./lib/editor.js";
 
 // ── Temp file management ────────────────────────────────────────────
 
@@ -118,7 +118,8 @@ export default function (pi: ExtensionAPI) {
 		description: "Show git changes and open diffs in VS Code Insiders or Vim (/diff [all] [vim])",
 		handler: async (args, ctx) => {
 			const parsed = parseDiffArgs(args);
-			const files = await getChangedFiles(ctx.cwd);
+			const root = await projectRoot(pi, ctx.cwd);
+			const files = await getChangedFiles(root);
 			if (files === null) {
 				ctx.ui.notify("git status failed", "error");
 				return;
@@ -140,7 +141,7 @@ export default function (pi: ExtensionAPI) {
 					process.stdout.write("\x1b[2J\x1b[H");
 
 					const result = spawnSync(command, commandArgs, {
-						cwd: ctx.cwd,
+						cwd: root,
 						stdio: "inherit",
 						env: process.env,
 					});
@@ -158,22 +159,23 @@ export default function (pi: ExtensionAPI) {
 
 			const openCodeDiff = async (file: FileInfo): Promise<void> => {
 				if (file.status === "?" || file.status === "A") {
-					await openCodeProjectFiles(pi, ctx.cwd, [file.file]);
+					await openCodeProjectFiles(pi, root, [file.file]);
 					return;
 				}
-				await openCodeDiffs(pi, ctx.cwd, [{ before: writeTmpFile(path.basename(file.file), getHeadContent(file.file, ctx.cwd)), after: file.file }]);
+				await openCodeDiffs(pi, root, [{ before: writeTmpFile(path.basename(file.file), getHeadContent(file.file, root)), after: file.file }]);
 			};
 
 			const openVimDiff = async (file: FileInfo): Promise<void> => {
 				if (file.status === "?" || file.status === "A") {
-					const r = await runTerminal("vim", vimArgs(file.file));
+					const r = await runTerminal("vim", vimArgs(absoluteFrom(root, file.file, root)));
 					if (r !== 0) throw new Error(`vim exited ${r}`);
 					return;
 				}
 
-				const tmpFile = writeTmpFile(path.basename(file.file), getHeadContent(file.file, ctx.cwd));
+				const tmpFile = writeTmpFile(path.basename(file.file), getHeadContent(file.file, root));
+				const afterFile = absoluteFrom(root, file.file, root);
 				const command = commandExists("vimdiff") ? "vimdiff" : "vim";
-				const commandArgs = command === "vimdiff" ? vimArgs(tmpFile, file.file) : vimArgs("-d", tmpFile, file.file);
+				const commandArgs = command === "vimdiff" ? vimArgs(tmpFile, afterFile) : vimArgs("-d", tmpFile, afterFile);
 				const r = await runTerminal(command, commandArgs);
 				if (r !== 0) throw new Error(`${command} exited ${r}`);
 			};
@@ -194,11 +196,11 @@ export default function (pi: ExtensionAPI) {
 				const plainFiles = openable.filter((f) => f.status === "?" || f.status === "A").map((f) => f.file);
 				const diffs = openable
 					.filter((f) => f.status !== "?" && f.status !== "A")
-					.map((f) => ({ before: writeTmpFile(path.basename(f.file), getHeadContent(f.file, ctx.cwd)), after: f.file }));
+					.map((f) => ({ before: writeTmpFile(path.basename(f.file), getHeadContent(f.file, root)), after: f.file }));
 
 				try {
-					if (plainFiles.length > 0) await openCodeProjectFiles(pi, ctx.cwd, plainFiles);
-					if (diffs.length > 0) await openCodeDiffs(pi, ctx.cwd, diffs);
+					if (plainFiles.length > 0) await openCodeProjectFiles(pi, root, plainFiles);
+					if (diffs.length > 0) await openCodeDiffs(pi, root, diffs);
 					return { opened: openable.length, errors: [] };
 				} catch {
 					return { opened: 0, errors: openable.map((f) => f.file) };
