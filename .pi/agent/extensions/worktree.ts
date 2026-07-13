@@ -32,10 +32,24 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function currentCmuxWorkspaceRef(pi: ExtensionAPI): Promise<string | undefined> {
+	const identify = await pi.exec("cmux", ["identify"]);
+	if (identify.code === 0 && identify.stdout.trim()) {
+		try {
+			const parsed = JSON.parse(identify.stdout) as {
+				caller?: { workspace_ref?: string };
+				focused?: { workspace_ref?: string };
+			};
+			return parsed.caller?.workspace_ref ?? parsed.focused?.workspace_ref ?? process.env.CMUX_WORKSPACE_ID;
+		} catch {}
+	}
+	return process.env.CMUX_WORKSPACE_ID;
+}
+
 async function closeCurrentCmuxWorkspace(pi: ExtensionAPI): Promise<void> {
-	const workspaceId = process.env.CMUX_WORKSPACE_ID;
-	if (!workspaceId) return;
-	await pi.exec("cmux", ["close-workspace", "--workspace", workspaceId]);
+	const workspaceRef = await currentCmuxWorkspaceRef(pi);
+	if (!workspaceRef) return;
+	await pi.exec("cmux", ["close-workspace", "--workspace", workspaceRef]);
 }
 
 function isCmux(): boolean {
