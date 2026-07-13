@@ -22,6 +22,10 @@ const projectRoots = [
 	{ path: path.join(os.homedir(), "Projects", "GitHub"), prefix: "GitHub/" },
 ];
 
+function dotfilesRoot(): string {
+	return process.env.DOTFILES_ROOT || path.join(os.homedir(), ".dotfiles");
+}
+
 function shellQuote(value: string): string {
 	return "'" + value.replace(/'/g, "'\\''") + "'";
 }
@@ -60,6 +64,10 @@ function isWorktreeContainer(name: string): boolean {
 
 function discoverProjects(): ProjectInfo[] {
 	const projects = new Map<string, ProjectInfo>();
+	const dotfilesPath = dotfilesRoot();
+	if (isDirectory(dotfilesPath)) {
+		projects.set(dotfilesPath, { name: "dotfiles", label: "dotfiles", path: dotfilesPath });
+	}
 
 	for (const root of projectRoots) {
 		if (!isDirectory(root.path)) continue;
