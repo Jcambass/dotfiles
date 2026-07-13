@@ -77,23 +77,43 @@ function discoverProjects(): ProjectInfo[] {
 	return [...projects.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function findProjects(projects: ProjectInfo[], query: string): ProjectInfo[] {
+function searchScore(project: ProjectInfo, query: string): number | null {
 	const clean = query.trim();
-	if (!clean) return [];
+	if (!clean) return 100;
 
 	const expanded = clean.startsWith("~/") ? path.join(os.homedir(), clean.slice(2)) : clean;
-	const exact = projects.filter((project) => {
-		return project.path === expanded
-			|| project.label === clean
-			|| project.name === clean;
-	});
-	if (exact.length > 0) return exact;
+	if (project.path === expanded) return 0;
 
 	const needle = clean.toLowerCase();
-	return projects.filter((project) => {
-		return project.label.toLowerCase().includes(needle)
-			|| project.name.toLowerCase().includes(needle);
-	});
+	const label = project.label.toLowerCase();
+	const name = project.name.toLowerCase();
+	const projectPath = project.path.toLowerCase();
+	const segments = label.split("/");
+
+	if (name === needle) return 1;
+	if (label === needle) return 2;
+	if (name.startsWith(needle)) return 3;
+	if (segments.some((segment) => segment.startsWith(needle))) return 4;
+	if (label.startsWith(needle)) return 5;
+	if (name.includes(needle)) return 6;
+	if (label.includes(needle)) return 7;
+	if (projectPath.includes(needle)) return 8;
+
+	const tokens = needle.split(/\s+/).filter(Boolean);
+	if (tokens.length > 1 && tokens.every((token) => label.includes(token) || name.includes(token) || projectPath.includes(token))) {
+		return 9;
+	}
+
+	return null;
+}
+
+function findProjects(projects: ProjectInfo[], query: string): ProjectInfo[] {
+	const scored = projects
+		.map((project) => ({ project, score: searchScore(project, query) }))
+		.filter((entry): entry is { project: ProjectInfo; score: number } => entry.score !== null);
+	return scored
+		.sort((a, b) => a.score - b.score || a.project.label.localeCompare(b.project.label))
+		.map((entry) => entry.project);
 }
 
 function extractWorkspaceRef(output: string): string | null {
@@ -181,7 +201,13 @@ export default function projectsExtension(pi: ExtensionAPI) {
 				sendProjectsList(projects);
 				return;
 			}
-			project = await selectProject(ctx, projects);
+			const search = (await ctx.ui.input("Project search", "enterprise2"))?.trim() ?? "";
+			const matches = search ? findProjects(projects, search) : projects;
+			if (matches.length === 0) {
+				ctx.ui.notify("No matching project found", "error");
+				return;
+			}
+			project = matches.length === 1 ? matches[0] : await selectProject(ctx, matches, search ? `Projects matching ${search}` : "Projects");
 		} else {
 			const matches = findProjects(projects, query);
 			if (matches.length === 0) {
@@ -202,9 +228,10 @@ export default function projectsExtension(pi: ExtensionAPI) {
 	pi.registerCommand("projects", {
 		description: "Open a plain Pi session for a project folder in a new cmux workspace",
 		getArgumentCompletions: (prefix) => {
-			const values = ["list", ...discoverProjects().map((project) => project.label)];
-			return values
-				.filter((value) => value.toLowerCase().startsWith(prefix.toLowerCase()))
+			const clean = prefix.trim();
+			const commandMatches = ["list"].filter((value) => value.startsWith(clean.toLowerCase()));
+			const projectMatches = clean ? findProjects(discoverProjects(), clean) : discoverProjects();
+			return [...commandMatches, ...projectMatches.map((project) => project.label)]
 				.slice(0, 25)
 				.map((value) => ({ value, label: value }));
 		},
