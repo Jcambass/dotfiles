@@ -127,9 +127,14 @@ function extractWorkspaceRef(output: string): string | null {
 
 function getWorkspaceTitle(worktreePath: string): string {
 	const repoWorktreesDir = path.basename(path.dirname(worktreePath));
-	const repoName = repoWorktreesDir.replace(/-worktrees$/, "");
+	const repoName = repoWorktreesDir.replace(/(?:\.worktrees|-worktrees)$/, "");
 	const slug = path.basename(worktreePath);
 	return `${repoName} · ${slug}`;
+}
+
+function sessionNameForWorktree(worktree: WorktreeInfo): string {
+	const name = path.basename(worktree.path).replace(/-/g, " ").trim();
+	return name || worktree.branch || "worktree";
 }
 
 function parseWorktreeList(output: string): WorktreeInfo[] {
@@ -246,6 +251,62 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		return { slug, branchName, worktreePath };
+	}
+
+	async function findCmuxWorkspaceForPath(worktreePath: string): Promise<string | undefined> {
+		if (!isCmux()) return undefined;
+		const snapshot = await pi.exec("cmux", ["rpc", "extension.sidebar.snapshot", "{}"]);
+		if (snapshot.code !== 0 || !snapshot.stdout.trim()) return undefined;
+
+		try {
+			const parsed = JSON.parse(snapshot.stdout) as {
+				workspaces?: Array<{
+					ref?: string;
+					current_directory?: string;
+					project_root_path?: string;
+					root_path?: string;
+					panel_directories?: string[];
+				}>;
+			};
+			for (const workspace of parsed.workspaces ?? []) {
+				const paths = [
+					workspace.project_root_path,
+					workspace.current_directory,
+					workspace.root_path,
+					...(workspace.panel_directories ?? []),
+				].filter((value): value is string => Boolean(value));
+				if (workspace.ref && paths.some((candidate) => samePath(candidate, worktreePath))) {
+					return workspace.ref;
+				}
+			}
+		} catch {}
+		return undefined;
+	}
+
+	async function openOrSwitchWorktree(ctx: ExtensionCommandContext, worktree: WorktreeInfo): Promise<void> {
+		if (!isCmux()) {
+			ctx.ui.notify("Opening worktrees requires cmux", "error");
+			return;
+		}
+
+		const existingWorkspace = await findCmuxWorkspaceForPath(worktree.path);
+		if (existingWorkspace) {
+			const selectResult = await pi.exec("cmux", ["select-workspace", "--workspace", existingWorkspace]);
+			if (selectResult.code === 0) {
+				ctx.ui.notify(`Switched to ${path.basename(worktree.path)}`, "info");
+			} else {
+				const reason = selectResult.stderr.trim() || selectResult.stdout.trim() || "cmux select-workspace failed";
+				ctx.ui.notify(reason, "error");
+			}
+			return;
+		}
+
+		const launchResult = await launchPiInCmuxWorkspace(worktree.path, sessionNameForWorktree(worktree), "chat");
+		if (launchResult.launched) {
+			ctx.ui.notify(`Launched ${path.basename(worktree.path)}`, "info");
+		} else {
+			ctx.ui.notify(launchResult.error ?? "Could not launch cmux workspace", "error");
+		}
 	}
 
 	async function launchPiInCmuxWorkspace(worktreePath: string, task: string, launchMode: LaunchMode): Promise<{ launched: boolean; workspaceRef?: string; workspaceTitle?: string; error?: string }> {
@@ -421,13 +482,13 @@ export default function (pi: ExtensionAPI) {
 
 		const selectedWorktree = labels.get(selected);
 		if (!selectedWorktree) return;
-		if (isMainWorktree(worktreesList, selectedWorktree)) {
-			ctx.ui.notify("The main worktree cannot be removed", "info");
-			return;
-		}
-
-		const action = await ctx.ui.select(path.basename(selectedWorktree.path), ["Remove worktree"]);
-		if (action === "Remove worktree") {
+		const actionOptions = isMainWorktree(worktreesList, selectedWorktree)
+			? ["Open / switch Pi session"]
+			: ["Open / switch Pi session", "Remove worktree"];
+		const action = await ctx.ui.select(path.basename(selectedWorktree.path), actionOptions);
+		if (action === "Open / switch Pi session") {
+			await openOrSwitchWorktree(ctx, selectedWorktree);
+		} else if (action === "Remove worktree") {
 			await removeWorktree(ctx, worktreesList, selectedWorktree, { force: false, yes: false, shutdown: false });
 		}
 	}
