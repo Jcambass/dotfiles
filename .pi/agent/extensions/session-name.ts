@@ -24,8 +24,18 @@ function syncTmuxSessionName(name: string | undefined): void {
 	} catch {}
 }
 
+function envSessionName(): string | undefined {
+	const name = process.env.PI_SESSION_NAME?.replace(/\s+/g, " ").trim();
+	return name || undefined;
+}
+
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async () => {
+		const envName = envSessionName();
+		if (envName && !pi.getSessionName()) {
+			pi.setSessionName(envName);
+			pi.events.emit(sessionNameChangedEvent, { name: envName });
+		}
 		syncTmuxSessionName(pi.getSessionName());
 	});
 	pi.registerCommand("session-name", {

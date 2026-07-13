@@ -10,7 +10,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 function slugify(input: string): string {
 	const slug = input
@@ -51,9 +51,10 @@ function getWorktreesRoot(gitRoot: string): string {
 type LaunchMode = "chat" | "autopilot";
 
 function formatPiCommand(task: string, launchMode: LaunchMode): string {
+	const sessionEnv = `PI_SESSION_NAME=${shellQuote(task)}`;
 	return launchMode === "autopilot"
-		? `pi ${shellQuote(`/autopilot ${task}`)}`
-		: "pi";
+		? `${sessionEnv} pi ${shellQuote(`/autopilot ${task}`)}`
+		: `${sessionEnv} pi`;
 }
 
 function formatLaunchCommand(worktreePath: string, task: string, launchMode: LaunchMode): string {
@@ -139,10 +140,7 @@ export default function (pi: ExtensionAPI) {
 		return { launched: true, workspaceRef, workspaceTitle };
 	}
 
-	pi.registerCommand("worktree", {
-		description:
-			"Create a new git worktree for a task and launch idle Pi there; use --autopilot to start work: /worktree [--autopilot] <task>",
-		handler: async (args, ctx) => {
+	const handler = async (args: string, ctx: ExtensionCommandContext) => {
 			const parsedArgs = parseWorktreeArgs(args);
 			let task = parsedArgs.task;
 			const launchMode = parsedArgs.launchMode;
@@ -227,6 +225,11 @@ export default function (pi: ExtensionAPI) {
 				launchedInCmux ? `Worktree created and launched: ${branchName}` : `Worktree created: ${branchName}`,
 				"info",
 			);
-		},
+		};
+
+	pi.registerCommand("worktree", {
+		description:
+			"Create a new git worktree for a task and launch idle Pi there; use --autopilot to start work: /worktree [--autopilot] <task>",
+		handler,
 	});
 }

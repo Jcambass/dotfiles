@@ -116,10 +116,11 @@ function cmuxNotify(title: string, body: string, subtitle?: string): void {
 	cmux(args);
 }
 
-function cmuxSetStatus(key: string, value: string, icon?: string, color?: string): void {
+function cmuxSetStatus(key: string, value: string, icon?: string, color?: string, priority?: number): void {
 	const args = ["set-status", key, value];
 	if (icon) args.push("--icon", icon);
 	if (color) args.push("--color", color);
+	if (priority !== undefined) args.push("--priority", String(priority));
 	cmux(args);
 }
 
@@ -156,6 +157,15 @@ function cmuxClearTabColor(): void {
 function truncTask(task: string, max: number = 50): string {
 	const clean = task.replace(/\s+/g, " ").trim();
 	return clean.length > max ? clean.slice(0, max) + "…" : clean;
+}
+
+function syncCmuxSessionName(name: string | undefined): void {
+	const clean = name?.replace(/\s+/g, " ").trim();
+	if (clean) {
+		cmuxSetStatus("pi-session", truncTask(clean, 40), "text.bubble", "#5ac8fa", 90);
+	} else {
+		cmuxClearStatus("pi-session");
+	}
 }
 
 // ── generic terminal notifications ───────────────────────────────────────────
@@ -217,6 +227,7 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 	pi.events.on(sessionNameChangedEvent, () => {
+		syncCmuxSessionName(pi.getSessionName());
 		flushStats();
 	});
 
@@ -344,12 +355,14 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		cmuxLog(`Session started${currentModel ? ` (${currentModel})` : ""}`);
+		syncCmuxSessionName(pi.getSessionName());
 		cmuxSetStatus("pi", "idle", "terminal.fill", "#8e8e93");
 		flushStats();
 	});
 
 	pi.on("session_shutdown", async () => {
 		cmuxClearStatus("pi");
+		cmuxClearStatus("pi-session");
 		cmuxClearProgress();
 		cmuxClearTabColor();
 		cmuxLog("Session ended");
@@ -394,6 +407,7 @@ export default function (pi: ExtensionAPI) {
 
 		cmuxClearLog();
 		cmuxLog(`Switched session (${event.reason})`);
+		syncCmuxSessionName(pi.getSessionName());
 		flushStats();
 	});
 

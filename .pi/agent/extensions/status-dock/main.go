@@ -380,7 +380,9 @@ func renderSession(b *builder, ws workspace, e *entry) {
 	}
 	b.section("Session", indicator)
 	if s.SessionName != "" {
-		b.wrap(s.SessionName, "", bold)
+		b.wrap(s.SessionName, paleCyan.Render("Name "), bold)
+	} else {
+		b.p(dim.Render("Name unnamed"))
 	}
 	if s.Model != "" {
 		b.p(gray.Render(truncate(s.Model, b.content)))
