@@ -318,9 +318,9 @@ export default function (pi: ExtensionAPI) {
 		const candidates = [target.id, target.ref].filter((value): value is string => Boolean(value));
 		let lastError = "cmux close-workspace failed";
 		for (const candidate of candidates) {
-			const result = await pi.exec("cmux", ["close-workspace", "--workspace", candidate]);
+			const result = await pi.exec("cmux", ["workspace", "close", candidate]);
 			if (result.code === 0) return { closed: true, ignored: false };
-			lastError = result.stderr.trim() || result.stdout.trim() || `cmux close-workspace failed for ${candidate}`;
+			lastError = result.stderr.trim() || result.stdout.trim() || `cmux workspace close failed for ${candidate}`;
 			if (/not[_ -]?found|Workspace not found/i.test(lastError)) {
 				return { closed: false, ignored: true };
 			}
