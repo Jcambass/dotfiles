@@ -32,26 +32,6 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function currentCmuxWorkspaceRef(pi: ExtensionAPI): Promise<string | undefined> {
-	const identify = await pi.exec("cmux", ["identify"]);
-	if (identify.code === 0 && identify.stdout.trim()) {
-		try {
-			const parsed = JSON.parse(identify.stdout) as {
-				caller?: { workspace_ref?: string };
-				focused?: { workspace_ref?: string };
-			};
-			return parsed.caller?.workspace_ref ?? parsed.focused?.workspace_ref ?? process.env.CMUX_WORKSPACE_ID;
-		} catch {}
-	}
-	return process.env.CMUX_WORKSPACE_ID;
-}
-
-async function closeCurrentCmuxWorkspace(pi: ExtensionAPI): Promise<void> {
-	const workspaceRef = await currentCmuxWorkspaceRef(pi);
-	if (!workspaceRef) return;
-	await pi.exec("cmux", ["close-workspace", "--workspace", workspaceRef]);
-}
-
 function isCmux(): boolean {
 	if (process.env.CMUX_WORKSPACE_ID) return true;
 	try {
@@ -347,29 +327,12 @@ export default function (pi: ExtensionAPI) {
 
 		const mainWorktree = worktreesList[0]?.path ?? ctx.cwd;
 		const dirty = await isDirty(target.path);
-		let forceRemove = opts.force;
-		if (dirty && !forceRemove) {
-			if (ctx.hasUI && !opts.yes) {
-				const ok = await ctx.ui.confirm(
-					"Worktree has uncommitted changes",
-					`Remove ${target.path} and discard its uncommitted changes?`,
-				);
-				if (!ok) return;
-				forceRemove = true;
-			} else {
-				ctx.ui.notify(`Worktree has uncommitted changes: ${target.path}. Use --force to remove it anyway.`, "error");
-				return;
-			}
-		}
+		const forceRemove = opts.force || dirty;
 
 		let deleteBranch = false;
-		let branchMessage = "No local branch was found for this worktree.";
 		if (target.branch) {
 			const branchSafety = await branchIsSafelyDeletable(mainWorktree, target.branch, dirty);
 			deleteBranch = branchSafety.safe;
-			branchMessage = deleteBranch
-				? `Branch will be deleted automatically: ${target.branch} (${branchSafety.reason}).`
-				: `Branch will be kept: ${target.branch} (${branchSafety.reason}).`;
 
 			if (!deleteBranch && ctx.hasUI && !opts.yes) {
 				deleteBranch = await ctx.ui.confirm(
@@ -380,18 +343,7 @@ export default function (pi: ExtensionAPI) {
 						"Force-delete this local branch after removing the worktree?",
 					].join("\n\n"),
 				);
-				branchMessage = deleteBranch
-					? `Branch will be force-deleted: ${target.branch}.`
-					: `Branch will be kept: ${target.branch}.`;
 			}
-		}
-
-		if (!dirty && ctx.hasUI && !opts.yes) {
-			const ok = await ctx.ui.confirm("Remove worktree?", [`Remove ${target.path}?`, branchMessage].join("\n\n"));
-			if (!ok) return;
-		} else if (!ctx.hasUI && !opts.yes) {
-			ctx.ui.notify("Use --yes to remove a worktree without interactive confirmation", "warning");
-			return;
 		}
 
 		if (opts.shutdown) {
@@ -414,10 +366,7 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 		ctx.ui.notify(summary, "info");
-		if (opts.shutdown) {
-			await closeCurrentCmuxWorkspace(pi);
-			ctx.shutdown();
-		}
+		if (opts.shutdown) ctx.shutdown();
 	}
 
 	async function listHandler(ctx: ExtensionCommandContext): Promise<void> {
@@ -431,7 +380,7 @@ export default function (pi: ExtensionAPI) {
 			...worktreesList.map((worktree) => describeWorktree(worktree, worktreesList, gitRootPath)),
 			"",
 			"Remove one with `/worktree remove <name-or-branch-or-path>`.",
-			"Delete the current linked worktree and close this cmux workspace with `/worktree delete`.",
+			"Delete the current linked worktree and end this Pi session with `/worktree delete`.",
 			"Branches matching origin or local main/master with no local changes are deleted automatically.",
 		].join("\n");
 		pi.sendMessage({
