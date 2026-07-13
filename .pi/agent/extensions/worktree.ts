@@ -32,6 +32,12 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function closeCurrentCmuxWorkspace(pi: ExtensionAPI): Promise<void> {
+	const workspaceId = process.env.CMUX_WORKSPACE_ID;
+	if (!workspaceId) return;
+	await pi.exec("cmux", ["close-workspace", "--workspace", workspaceId]);
+}
+
 function isCmux(): boolean {
 	if (process.env.CMUX_WORKSPACE_ID) return true;
 	try {
@@ -394,7 +400,10 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 		ctx.ui.notify(summary, "info");
-		if (opts.shutdown) ctx.shutdown();
+		if (opts.shutdown) {
+			await closeCurrentCmuxWorkspace(pi);
+			ctx.shutdown();
+		}
 	}
 
 	async function listHandler(ctx: ExtensionCommandContext): Promise<void> {
@@ -408,7 +417,7 @@ export default function (pi: ExtensionAPI) {
 			...worktreesList.map((worktree) => describeWorktree(worktree, worktreesList, gitRootPath)),
 			"",
 			"Remove one with `/worktree remove <name-or-branch-or-path>`.",
-			"Delete the current linked worktree with `/worktree delete`.",
+			"Delete the current linked worktree and close this cmux workspace with `/worktree delete`.",
 			"Branches matching origin or local main/master with no local changes are deleted automatically.",
 		].join("\n");
 		pi.sendMessage({
