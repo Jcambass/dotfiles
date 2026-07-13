@@ -165,15 +165,27 @@ function isMainWorktree(worktrees: WorktreeInfo[], worktree: WorktreeInfo): bool
 	return worktrees.length > 0 && samePath(worktrees[0].path, worktree.path);
 }
 
-function describeWorktree(worktree: WorktreeInfo, worktrees: WorktreeInfo[], currentRoot: string): string {
+function worktreeBadges(worktree: WorktreeInfo, worktrees: WorktreeInfo[], currentRoot: string): string[] {
 	const parts: string[] = [];
 	if (samePath(worktree.path, currentRoot)) parts.push("current");
 	if (isMainWorktree(worktrees, worktree)) parts.push("main");
 	if (worktree.locked) parts.push("locked");
 	if (worktree.prunable) parts.push("prunable");
+	return parts;
+}
+
+function describeWorktree(worktree: WorktreeInfo, worktrees: WorktreeInfo[], currentRoot: string): string {
+	const parts = worktreeBadges(worktree, worktrees, currentRoot);
 	const suffix = parts.length > 0 ? ` (${parts.join(", ")})` : "";
 	const branch = worktree.branch ?? (worktree.detached ? "detached" : "unknown");
 	return `- ${worktree.path}\n  branch: ${branch}${suffix}`;
+}
+
+function worktreePickerLabel(worktree: WorktreeInfo, worktrees: WorktreeInfo[], currentRoot: string): string {
+	const branch = worktree.branch ?? (worktree.detached ? "detached" : "unknown");
+	const badges = worktreeBadges(worktree, worktrees, currentRoot);
+	const suffix = badges.length > 0 ? ` (${badges.join(", ")})` : "";
+	return `${path.basename(worktree.path)} — ${branch}${suffix}`;
 }
 
 function findWorktree(worktrees: WorktreeInfo[], target: string): WorktreeInfo[] {
@@ -369,11 +381,7 @@ export default function (pi: ExtensionAPI) {
 		if (opts.shutdown) ctx.shutdown();
 	}
 
-	async function listHandler(ctx: ExtensionCommandContext): Promise<void> {
-		const gitRootPath = await gitRoot(ctx);
-		if (!gitRootPath) return;
-		const worktreesList = await worktrees(ctx, gitRootPath);
-		if (!worktreesList) return;
+	function sendWorktreeDetails(gitRootPath: string, worktreesList: WorktreeInfo[]): void {
 		const message = [
 			`Git worktrees for ${gitRootPath}`,
 			"",
@@ -388,6 +396,47 @@ export default function (pi: ExtensionAPI) {
 			content: [{ type: "text", text: message }],
 			display: "user",
 		});
+	}
+
+	async function listHandler(ctx: ExtensionCommandContext): Promise<void> {
+		const gitRootPath = await gitRoot(ctx);
+		if (!gitRootPath) return;
+		const worktreesList = await worktrees(ctx, gitRootPath);
+		if (!worktreesList) return;
+
+		if (!ctx.hasUI) {
+			sendWorktreeDetails(gitRootPath, worktreesList);
+			return;
+		}
+
+		const labels = new Map<string, WorktreeInfo>();
+		for (const worktree of worktreesList) {
+			let label = worktreePickerLabel(worktree, worktreesList, gitRootPath);
+			while (labels.has(label)) label = `${label} `;
+			labels.set(label, worktree);
+		}
+		const showAllLabel = "Show full details";
+		const selected = await ctx.ui.select("Git worktrees", [showAllLabel, ...labels.keys()]);
+		if (!selected) return;
+		if (selected === showAllLabel) {
+			sendWorktreeDetails(gitRootPath, worktreesList);
+			return;
+		}
+
+		const selectedWorktree = labels.get(selected);
+		if (!selectedWorktree) return;
+		const isMain = isMainWorktree(worktreesList, selectedWorktree);
+		const actionOptions = isMain ? ["Show details"] : ["Remove worktree", "Show details"];
+		const action = await ctx.ui.select(path.basename(selectedWorktree.path), actionOptions);
+		if (action === "Show details") {
+			pi.sendMessage({
+				customType: "worktree-details",
+				content: [{ type: "text", text: describeWorktree(selectedWorktree, worktreesList, gitRootPath) }],
+				display: "user",
+			});
+		} else if (action === "Remove worktree") {
+			await removeWorktree(ctx, worktreesList, selectedWorktree, { force: false, yes: false, shutdown: false });
+		}
 	}
 
 	async function removeHandler(parsedArgs: ParsedArgs, ctx: ExtensionCommandContext): Promise<void> {
