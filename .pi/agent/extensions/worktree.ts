@@ -281,7 +281,9 @@ export default function (pi: ExtensionAPI) {
 		return { slug, branchName, worktreePath };
 	}
 
-	async function findCmuxWorkspaceForPath(worktreePath: string): Promise<string | undefined> {
+	type CmuxWorkspaceTarget = { id?: string; ref?: string };
+
+	async function findCmuxWorkspaceForPath(worktreePath: string): Promise<CmuxWorkspaceTarget | undefined> {
 		if (!isCmux()) return undefined;
 		const snapshot = await pi.exec("cmux", ["rpc", "extension.sidebar.snapshot", "{}"]);
 		if (snapshot.code !== 0 || !snapshot.stdout.trim()) return undefined;
@@ -289,6 +291,7 @@ export default function (pi: ExtensionAPI) {
 		try {
 			const parsed = JSON.parse(snapshot.stdout) as {
 				workspaces?: Array<{
+					id?: string;
 					ref?: string;
 					current_directory?: string;
 					project_root_path?: string;
@@ -303,12 +306,26 @@ export default function (pi: ExtensionAPI) {
 					workspace.root_path,
 					...(workspace.panel_directories ?? []),
 				].filter((value): value is string => Boolean(value));
-				if (workspace.ref && paths.some((candidate) => pathContains(worktreePath, candidate))) {
-					return workspace.ref;
+				if ((workspace.id || workspace.ref) && paths.some((candidate) => pathContains(worktreePath, candidate))) {
+					return { id: workspace.id, ref: workspace.ref };
 				}
 			}
 		} catch {}
 		return undefined;
+	}
+
+	async function closeCmuxWorkspace(target: CmuxWorkspaceTarget): Promise<{ closed: boolean; ignored: boolean; error?: string }> {
+		const candidates = [target.id, target.ref].filter((value): value is string => Boolean(value));
+		let lastError = "cmux close-workspace failed";
+		for (const candidate of candidates) {
+			const result = await pi.exec("cmux", ["close-workspace", "--workspace", candidate]);
+			if (result.code === 0) return { closed: true, ignored: false };
+			lastError = result.stderr.trim() || result.stdout.trim() || `cmux close-workspace failed for ${candidate}`;
+			if (/not[_ -]?found|Workspace not found/i.test(lastError)) {
+				return { closed: false, ignored: true };
+			}
+		}
+		return { closed: false, ignored: false, error: lastError };
 	}
 
 	async function openOrSwitchWorktree(ctx: ExtensionCommandContext, worktree: WorktreeInfo): Promise<void> {
@@ -318,8 +335,9 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		const existingWorkspace = await findCmuxWorkspaceForPath(worktree.path);
-		if (existingWorkspace) {
-			const selectResult = await pi.exec("cmux", ["select-workspace", "--workspace", existingWorkspace]);
+		const existingWorkspaceRef = existingWorkspace?.ref ?? existingWorkspace?.id;
+		if (existingWorkspaceRef) {
+			const selectResult = await pi.exec("cmux", ["select-workspace", "--workspace", existingWorkspaceRef]);
 			if (selectResult.code === 0) {
 				ctx.ui.notify(`Switched to ${path.basename(worktree.path)}`, "info");
 			} else {
@@ -473,10 +491,9 @@ export default function (pi: ExtensionAPI) {
 		}
 		ctx.ui.notify(summary, "info");
 		if (workspaceToClose) {
-			const closeResult = await pi.exec("cmux", ["close-workspace", "--workspace", workspaceToClose]);
-			if (closeResult.code === 0) return;
-			const reason = closeResult.stderr.trim() || closeResult.stdout.trim() || "cmux close-workspace failed";
-			ctx.ui.notify(reason, "error");
+			const closeResult = await closeCmuxWorkspace(workspaceToClose);
+			if (closeResult.closed || closeResult.ignored) return;
+			ctx.ui.notify(`Removed worktree, but could not close cmux workspace: ${closeResult.error}`, "warning");
 		}
 		if (opts.shutdown) ctx.shutdown();
 	}
