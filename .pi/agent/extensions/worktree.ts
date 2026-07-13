@@ -181,11 +181,19 @@ function describeWorktree(worktree: WorktreeInfo, worktrees: WorktreeInfo[], cur
 	return `- ${worktree.path}\n  branch: ${branch}${suffix}`;
 }
 
+function repoNameForWorktree(worktree: WorktreeInfo, worktrees: WorktreeInfo[]): string {
+	if (isMainWorktree(worktrees, worktree)) return path.basename(worktree.path);
+	const parentName = path.basename(path.dirname(worktree.path));
+	return parentName.replace(/(?:\.worktrees|-worktrees)$/, "");
+}
+
 function worktreePickerLabel(worktree: WorktreeInfo, worktrees: WorktreeInfo[], currentRoot: string): string {
+	const repo = repoNameForWorktree(worktree, worktrees);
+	const name = path.basename(worktree.path);
 	const branch = worktree.branch ?? (worktree.detached ? "detached" : "unknown");
 	const badges = worktreeBadges(worktree, worktrees, currentRoot);
 	const suffix = badges.length > 0 ? ` (${badges.join(", ")})` : "";
-	return `${path.basename(worktree.path)} — ${branch}${suffix}`;
+	return `${repo} — ${name} — ${branch}${suffix}`;
 }
 
 function findWorktree(worktrees: WorktreeInfo[], target: string): WorktreeInfo[] {
