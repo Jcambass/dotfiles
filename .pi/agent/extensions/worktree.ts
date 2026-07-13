@@ -268,36 +268,132 @@ export default function (pi: ExtensionAPI) {
 		return status.code === 0 && status.stdout.trim().length > 0;
 	}
 
+	async function originRefForBranch(mainWorktree: string, branch: string): Promise<string | null> {
+		const upstream = await pi.exec("git", ["rev-parse", "--abbrev-ref", `${branch}@{upstream}`], { cwd: mainWorktree });
+		const upstreamRef = upstream.stdout.trim();
+		if (upstream.code === 0 && upstreamRef.startsWith("origin/")) return upstreamRef;
+
+		const originRef = `origin/${branch}`;
+		const originCheck = await pi.exec("git", ["rev-parse", "--verify", "--quiet", originRef], { cwd: mainWorktree });
+		return originCheck.code === 0 ? originRef : null;
+	}
+
+	async function localMainRef(mainWorktree: string): Promise<string | null> {
+		for (const candidate of ["main", "master"]) {
+			const check = await pi.exec("git", ["rev-parse", "--verify", "--quiet", candidate], { cwd: mainWorktree });
+			if (check.code === 0) return candidate;
+		}
+		return null;
+	}
+
+	async function compareBranchWithRef(mainWorktree: string, branch: string, ref: string): Promise<{ safe: boolean; reason: string }> {
+		const counts = await pi.exec("git", ["rev-list", "--left-right", "--count", `${ref}...${branch}`], { cwd: mainWorktree });
+		const [behindRaw, aheadRaw] = counts.stdout.trim().split(/\s+/);
+		const behind = Number(behindRaw ?? 0);
+		const ahead = Number(aheadRaw ?? 0);
+		if (counts.code === 0 && behind === 0 && ahead === 0) {
+			return { safe: true, reason: `branch matches ${ref}` };
+		}
+
+		const parts: string[] = [];
+		if (ahead > 0) parts.push(`${ahead} commit${ahead === 1 ? "" : "s"} ahead of ${ref}`);
+		if (behind > 0) parts.push(`${behind} commit${behind === 1 ? "" : "s"} behind ${ref}`);
+		return { safe: false, reason: parts.join(" and ") || `could not compare with ${ref}` };
+	}
+
+	async function branchIsSafelyDeletable(mainWorktree: string, branch: string, dirty: boolean): Promise<{ safe: boolean; reason: string }> {
+		if (dirty) return { safe: false, reason: "the worktree has uncommitted changes" };
+
+		const originRef = await originRefForBranch(mainWorktree, branch);
+		if (originRef) return compareBranchWithRef(mainWorktree, branch, originRef);
+
+		const baseRef = await localMainRef(mainWorktree);
+		if (baseRef) return compareBranchWithRef(mainWorktree, branch, baseRef);
+
+		return { safe: false, reason: "the branch has no matching origin tracking branch and no local main/master branch" };
+	}
+
+	async function deleteLocalBranch(mainWorktree: string, branch: string): Promise<string | null> {
+		const result = await pi.exec("git", ["branch", "-D", branch], { cwd: mainWorktree });
+		if (result.code === 0) return null;
+		return result.stderr.trim() || result.stdout.trim() || "git branch -D failed";
+	}
+
 	async function removeWorktree(ctx: ExtensionCommandContext, worktreesList: WorktreeInfo[], target: WorktreeInfo, opts: { force: boolean; yes: boolean; shutdown: boolean }): Promise<void> {
 		if (isMainWorktree(worktreesList, target)) {
 			ctx.ui.notify("Refusing to remove the main worktree", "error");
 			return;
 		}
-		if (!opts.force && await isDirty(target.path)) {
-			ctx.ui.notify(`Worktree has uncommitted changes: ${target.path}. Use --force to remove it anyway.`, "error");
-			return;
+
+		const mainWorktree = worktreesList[0]?.path ?? ctx.cwd;
+		const dirty = await isDirty(target.path);
+		let forceRemove = opts.force;
+		if (dirty && !forceRemove) {
+			if (ctx.hasUI && !opts.yes) {
+				const ok = await ctx.ui.confirm(
+					"Worktree has uncommitted changes",
+					`Remove ${target.path} and discard its uncommitted changes?`,
+				);
+				if (!ok) return;
+				forceRemove = true;
+			} else {
+				ctx.ui.notify(`Worktree has uncommitted changes: ${target.path}. Use --force to remove it anyway.`, "error");
+				return;
+			}
 		}
-		if (ctx.hasUI && !opts.yes) {
-			const branch = target.branch ? `\nBranch remains: ${target.branch}` : "";
-			const ok = await ctx.ui.confirm("Remove worktree?", `Remove ${target.path}?${branch}`);
+
+		let deleteBranch = false;
+		let branchMessage = "No local branch was found for this worktree.";
+		if (target.branch) {
+			const branchSafety = await branchIsSafelyDeletable(mainWorktree, target.branch, dirty);
+			deleteBranch = branchSafety.safe;
+			branchMessage = deleteBranch
+				? `Branch will be deleted automatically: ${target.branch} (${branchSafety.reason}).`
+				: `Branch will be kept: ${target.branch} (${branchSafety.reason}).`;
+
+			if (!deleteBranch && ctx.hasUI && !opts.yes) {
+				deleteBranch = await ctx.ui.confirm(
+					"Delete branch too?",
+					[
+						`The worktree branch is not automatically safe to delete: ${branchSafety.reason}.`,
+						`Branch: ${target.branch}`,
+						"Force-delete this local branch after removing the worktree?",
+					].join("\n\n"),
+				);
+				branchMessage = deleteBranch
+					? `Branch will be force-deleted: ${target.branch}.`
+					: `Branch will be kept: ${target.branch}.`;
+			}
+		}
+
+		if (!dirty && ctx.hasUI && !opts.yes) {
+			const ok = await ctx.ui.confirm("Remove worktree?", [`Remove ${target.path}?`, branchMessage].join("\n\n"));
 			if (!ok) return;
 		} else if (!ctx.hasUI && !opts.yes) {
 			ctx.ui.notify("Use --yes to remove a worktree without interactive confirmation", "warning");
 			return;
 		}
 
-		const mainWorktree = worktreesList[0]?.path;
 		if (opts.shutdown) {
 			try { process.chdir(os.homedir()); } catch {}
 		}
-		const removeResult = await pi.exec("git", ["worktree", "remove", ...(opts.force ? ["--force"] : []), target.path], { cwd: mainWorktree ?? ctx.cwd });
+		const removeResult = await pi.exec("git", ["worktree", "remove", ...(forceRemove ? ["--force"] : []), target.path], { cwd: mainWorktree });
 		if (removeResult.code !== 0) {
 			const reason = removeResult.stderr.trim() || removeResult.stdout.trim() || "git worktree remove failed";
 			ctx.ui.notify(reason, "error");
 			return;
 		}
 
-		ctx.ui.notify(`Removed worktree: ${target.path}`, "info");
+		let summary = `Removed worktree: ${target.path}`;
+		if (target.branch) {
+			if (deleteBranch) {
+				const branchError = await deleteLocalBranch(mainWorktree, target.branch);
+				summary += branchError ? `; branch kept (${branchError})` : `; deleted branch: ${target.branch}`;
+			} else {
+				summary += `; kept branch: ${target.branch}`;
+			}
+		}
+		ctx.ui.notify(summary, "info");
 		if (opts.shutdown) ctx.shutdown();
 	}
 
@@ -313,6 +409,7 @@ export default function (pi: ExtensionAPI) {
 			"",
 			"Remove one with `/worktree remove <name-or-branch-or-path>`.",
 			"Delete the current linked worktree with `/worktree delete`.",
+			"Branches matching origin or local main/master with no local changes are deleted automatically.",
 		].join("\n");
 		pi.sendMessage({
 			customType: "worktree-list",
