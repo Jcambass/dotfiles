@@ -181,19 +181,12 @@ function describeWorktree(worktree: WorktreeInfo, worktrees: WorktreeInfo[], cur
 	return `- ${worktree.path}\n  branch: ${branch}${suffix}`;
 }
 
-function repoNameForWorktree(worktree: WorktreeInfo, worktrees: WorktreeInfo[]): string {
-	if (isMainWorktree(worktrees, worktree)) return path.basename(worktree.path);
-	const parentName = path.basename(path.dirname(worktree.path));
-	return parentName.replace(/(?:\.worktrees|-worktrees)$/, "");
-}
-
 function worktreePickerLabel(worktree: WorktreeInfo, worktrees: WorktreeInfo[], currentRoot: string): string {
-	const repo = repoNameForWorktree(worktree, worktrees);
 	const name = path.basename(worktree.path);
 	const branch = worktree.branch ?? (worktree.detached ? "detached" : "unknown");
 	const badges = worktreeBadges(worktree, worktrees, currentRoot);
 	const suffix = badges.length > 0 ? ` (${badges.join(", ")})` : "";
-	return `${repo} — ${name} — ${branch}${suffix}`;
+	return `${name} — ${branch}${suffix}`;
 }
 
 function findWorktree(worktrees: WorktreeInfo[], target: string): WorktreeInfo[] {
@@ -423,26 +416,18 @@ export default function (pi: ExtensionAPI) {
 			while (labels.has(label)) label = `${label} `;
 			labels.set(label, worktree);
 		}
-		const showAllLabel = "Show full details";
-		const selected = await ctx.ui.select("Git worktrees", [showAllLabel, ...labels.keys()]);
+		const selected = await ctx.ui.select(`Worktrees for ${path.basename(gitRootPath)}`, [...labels.keys()]);
 		if (!selected) return;
-		if (selected === showAllLabel) {
-			sendWorktreeDetails(gitRootPath, worktreesList);
-			return;
-		}
 
 		const selectedWorktree = labels.get(selected);
 		if (!selectedWorktree) return;
-		const isMain = isMainWorktree(worktreesList, selectedWorktree);
-		const actionOptions = isMain ? ["Show details"] : ["Remove worktree", "Show details"];
-		const action = await ctx.ui.select(path.basename(selectedWorktree.path), actionOptions);
-		if (action === "Show details") {
-			pi.sendMessage({
-				customType: "worktree-details",
-				content: [{ type: "text", text: describeWorktree(selectedWorktree, worktreesList, gitRootPath) }],
-				display: "user",
-			});
-		} else if (action === "Remove worktree") {
+		if (isMainWorktree(worktreesList, selectedWorktree)) {
+			ctx.ui.notify("The main worktree cannot be removed", "info");
+			return;
+		}
+
+		const action = await ctx.ui.select(path.basename(selectedWorktree.path), ["Remove worktree"]);
+		if (action === "Remove worktree") {
 			await removeWorktree(ctx, worktreesList, selectedWorktree, { force: false, yes: false, shutdown: false });
 		}
 	}
