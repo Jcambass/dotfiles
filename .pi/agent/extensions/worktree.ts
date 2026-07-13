@@ -319,6 +319,8 @@ export default function (pi: ExtensionAPI) {
 			worktreePath,
 			"--command",
 			piCommand,
+			"--focus",
+			"true",
 		]);
 		if (createResult.code !== 0) {
 			return {
@@ -332,6 +334,7 @@ export default function (pi: ExtensionAPI) {
 		if (workspaceRef) {
 			await sleep(200);
 			await pi.exec("cmux", ["rename-workspace", "--workspace", workspaceRef, workspaceTitle]);
+			await pi.exec("cmux", ["select-workspace", "--workspace", workspaceRef]);
 		}
 
 		return { launched: true, workspaceRef, workspaceTitle };
