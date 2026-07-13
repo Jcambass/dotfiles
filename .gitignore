@@ -6,3 +6,4 @@ git/gitconfig.local.symlink
 .pi/agent/bin/
 .pi/agent/config/
 .pi/agent/gh/
+.pi/agent/extensions/status-dock/pi-status-dock
