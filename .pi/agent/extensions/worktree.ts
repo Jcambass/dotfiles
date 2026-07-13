@@ -283,25 +283,6 @@ export default function (pi: ExtensionAPI) {
 
 	type CmuxWorkspaceTarget = { id?: string; ref?: string };
 
-	async function currentCmuxWorkspaceTarget(): Promise<CmuxWorkspaceTarget | undefined> {
-		if (!isCmux()) return undefined;
-		const target: CmuxWorkspaceTarget = {};
-		if (process.env.CMUX_WORKSPACE_ID) target.id = process.env.CMUX_WORKSPACE_ID;
-
-		const identify = await pi.exec("cmux", ["identify"]);
-		if (identify.code === 0 && identify.stdout.trim()) {
-			try {
-				const parsed = JSON.parse(identify.stdout) as {
-					caller?: { workspace_ref?: string };
-					focused?: { workspace_ref?: string };
-				};
-				target.ref = parsed.caller?.workspace_ref ?? parsed.focused?.workspace_ref ?? target.ref;
-			} catch {}
-		}
-
-		return target.id || target.ref ? target : undefined;
-	}
-
 	async function findCmuxWorkspaceForPath(worktreePath: string): Promise<CmuxWorkspaceTarget | undefined> {
 		if (!isCmux()) return undefined;
 		const snapshot = await pi.exec("cmux", ["rpc", "extension.sidebar.snapshot", "{}"]);
@@ -331,20 +312,6 @@ export default function (pi: ExtensionAPI) {
 			}
 		} catch {}
 		return undefined;
-	}
-
-	async function closeCmuxWorkspace(target: CmuxWorkspaceTarget): Promise<{ closed: boolean; ignored: boolean; error?: string }> {
-		const candidates = [target.id, target.ref].filter((value): value is string => Boolean(value));
-		let lastError = "cmux close-workspace failed";
-		for (const candidate of candidates) {
-			const result = await pi.exec("cmux", ["workspace", "close", candidate]);
-			if (result.code === 0) return { closed: true, ignored: false };
-			lastError = result.stderr.trim() || result.stdout.trim() || `cmux workspace close failed for ${candidate}`;
-			if (/not[_ -]?found|Workspace not found/i.test(lastError)) {
-				return { closed: false, ignored: true };
-			}
-		}
-		return { closed: false, ignored: false, error: lastError };
 	}
 
 	async function openOrSwitchWorktree(ctx: ExtensionCommandContext, worktree: WorktreeInfo): Promise<void> {
@@ -461,18 +428,13 @@ export default function (pi: ExtensionAPI) {
 		return result.stderr.trim() || result.stdout.trim() || "git branch -D failed";
 	}
 
-	async function removeWorktree(ctx: ExtensionCommandContext, worktreesList: WorktreeInfo[], target: WorktreeInfo, opts: { force: boolean; yes: boolean; shutdown: boolean; closeWorkspace?: boolean; closeCurrentWorkspace?: boolean }): Promise<void> {
+	async function removeWorktree(ctx: ExtensionCommandContext, worktreesList: WorktreeInfo[], target: WorktreeInfo, opts: { force: boolean; yes: boolean; shutdown: boolean }): Promise<void> {
 		if (isMainWorktree(worktreesList, target)) {
 			ctx.ui.notify("Refusing to remove the main worktree", "error");
 			return;
 		}
 
 		const mainWorktree = worktreesList[0]?.path ?? ctx.cwd;
-		const workspaceToClose = opts.closeWorkspace
-			? opts.closeCurrentWorkspace
-				? await currentCmuxWorkspaceTarget() ?? await findCmuxWorkspaceForPath(target.path)
-				: await findCmuxWorkspaceForPath(target.path)
-			: undefined;
 		const dirty = await isDirty(target.path);
 		const forceRemove = opts.force || dirty;
 
@@ -513,11 +475,6 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 		ctx.ui.notify(summary, "info");
-		if (workspaceToClose) {
-			const closeResult = await closeCmuxWorkspace(workspaceToClose);
-			if (closeResult.closed || closeResult.ignored) return;
-			ctx.ui.notify(`Removed worktree, but could not close cmux workspace: ${closeResult.error}`, "warning");
-		}
 		if (opts.shutdown) ctx.shutdown();
 	}
 
@@ -567,7 +524,7 @@ export default function (pi: ExtensionAPI) {
 		if (action === "Open / switch Pi session") {
 			await openOrSwitchWorktree(ctx, selectedWorktree);
 		} else if (action === "Remove worktree") {
-			await removeWorktree(ctx, worktreesList, selectedWorktree, { force: false, yes: false, shutdown: false, closeWorkspace: true });
+			await removeWorktree(ctx, worktreesList, selectedWorktree, { force: false, yes: false, shutdown: false });
 		}
 	}
 
@@ -607,7 +564,7 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify("/worktree delete only works from inside a linked git worktree", "error");
 			return;
 		}
-		await removeWorktree(ctx, worktreesList, current, { force: parsedArgs.force, yes: parsedArgs.yes, shutdown: true, closeWorkspace: true, closeCurrentWorkspace: true });
+		await removeWorktree(ctx, worktreesList, current, { force: parsedArgs.force, yes: parsedArgs.yes, shutdown: true });
 	}
 
 	async function createHandler(parsedArgs: ParsedArgs, ctx: ExtensionCommandContext): Promise<void> {
