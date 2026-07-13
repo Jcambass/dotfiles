@@ -158,12 +158,40 @@ function parseWorktreeList(output: string): WorktreeInfo[] {
 	return entries;
 }
 
-function samePath(a: string, b: string): boolean {
+function realPath(value: string): string {
+	const resolved = path.resolve(value);
 	try {
-		return fs.realpathSync.native(a) === fs.realpathSync.native(b);
+		return fs.realpathSync.native(resolved);
 	} catch {
-		return path.resolve(a) === path.resolve(b);
+		const missingParts: string[] = [];
+		for (let current = resolved; ; current = path.dirname(current)) {
+			if (fs.existsSync(current)) {
+				try {
+					return path.join(fs.realpathSync.native(current), ...missingParts);
+				} catch {
+					return resolved;
+				}
+			}
+			const parent = path.dirname(current);
+			if (parent === current) return resolved;
+			missingParts.unshift(path.basename(current));
+		}
 	}
+}
+
+function samePath(a: string, b: string): boolean {
+	return realPath(a) === realPath(b);
+}
+
+function pathContains(root: string, candidate: string): boolean {
+	const roots = new Set([realPath(root), path.resolve(root)]);
+	const candidates = new Set([realPath(candidate), path.resolve(candidate)]);
+	for (const rootPath of roots) {
+		for (const candidatePath of candidates) {
+			if (candidatePath === rootPath || candidatePath.startsWith(rootPath + path.sep)) return true;
+		}
+	}
+	return false;
 }
 
 function isMainWorktree(worktrees: WorktreeInfo[], worktree: WorktreeInfo): boolean {
@@ -275,7 +303,7 @@ export default function (pi: ExtensionAPI) {
 					workspace.root_path,
 					...(workspace.panel_directories ?? []),
 				].filter((value): value is string => Boolean(value));
-				if (workspace.ref && paths.some((candidate) => samePath(candidate, worktreePath))) {
+				if (workspace.ref && paths.some((candidate) => pathContains(worktreePath, candidate))) {
 					return workspace.ref;
 				}
 			}
@@ -396,13 +424,14 @@ export default function (pi: ExtensionAPI) {
 		return result.stderr.trim() || result.stdout.trim() || "git branch -D failed";
 	}
 
-	async function removeWorktree(ctx: ExtensionCommandContext, worktreesList: WorktreeInfo[], target: WorktreeInfo, opts: { force: boolean; yes: boolean; shutdown: boolean }): Promise<void> {
+	async function removeWorktree(ctx: ExtensionCommandContext, worktreesList: WorktreeInfo[], target: WorktreeInfo, opts: { force: boolean; yes: boolean; shutdown: boolean; closeWorkspace?: boolean }): Promise<void> {
 		if (isMainWorktree(worktreesList, target)) {
 			ctx.ui.notify("Refusing to remove the main worktree", "error");
 			return;
 		}
 
 		const mainWorktree = worktreesList[0]?.path ?? ctx.cwd;
+		const workspaceToClose = opts.closeWorkspace ? await findCmuxWorkspaceForPath(target.path) : undefined;
 		const dirty = await isDirty(target.path);
 		const forceRemove = opts.force || dirty;
 
@@ -443,6 +472,12 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 		ctx.ui.notify(summary, "info");
+		if (workspaceToClose) {
+			const closeResult = await pi.exec("cmux", ["close-workspace", "--workspace", workspaceToClose]);
+			if (closeResult.code === 0) return;
+			const reason = closeResult.stderr.trim() || closeResult.stdout.trim() || "cmux close-workspace failed";
+			ctx.ui.notify(reason, "error");
+		}
 		if (opts.shutdown) ctx.shutdown();
 	}
 
@@ -492,7 +527,7 @@ export default function (pi: ExtensionAPI) {
 		if (action === "Open / switch Pi session") {
 			await openOrSwitchWorktree(ctx, selectedWorktree);
 		} else if (action === "Remove worktree") {
-			await removeWorktree(ctx, worktreesList, selectedWorktree, { force: false, yes: false, shutdown: false });
+			await removeWorktree(ctx, worktreesList, selectedWorktree, { force: false, yes: false, shutdown: false, closeWorkspace: true });
 		}
 	}
 
@@ -532,7 +567,7 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify("/worktree delete only works from inside a linked git worktree", "error");
 			return;
 		}
-		await removeWorktree(ctx, worktreesList, current, { force: parsedArgs.force, yes: parsedArgs.yes, shutdown: true });
+		await removeWorktree(ctx, worktreesList, current, { force: parsedArgs.force, yes: parsedArgs.yes, shutdown: true, closeWorkspace: true });
 	}
 
 	async function createHandler(parsedArgs: ParsedArgs, ctx: ExtensionCommandContext): Promise<void> {
