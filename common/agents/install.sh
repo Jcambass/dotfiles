@@ -615,6 +615,31 @@ _agents_link_pi_agent() {
   fi
 }
 
+_agents_remove_stale_extension_link() {
+  local root="$1" filename="$2"
+  local expected_src dest
+
+  expected_src="$root/.pi/agent/extensions/$filename"
+  dest="$HOME/.pi/agent/extensions/$filename"
+
+  # Source still present in repo — nothing to prune
+  if [ -e "$expected_src" ]; then
+    return 0
+  fi
+
+  # Not a symlink — leave it alone (user-owned or generated file)
+  if [ ! -L "$dest" ]; then
+    return 0
+  fi
+
+  # Only remove if the symlink resolves back to the expected repo location
+  if ! _agents_same_path "$dest" "$expected_src"; then
+    return 0
+  fi
+
+  rm "$dest" && _agents_log "removed stale extension link $dest"
+}
+
 _agents_link_opencode_config() {
   local root="$1" src="$root/common/agents/opencode.json" dest="$HOME/.config/opencode/opencode.json"
 
@@ -784,6 +809,8 @@ _agents_main() {
 
   _agents_link_global_agents "$root" || failures=$((failures + 1))
   _agents_link_pi_agent "$root" || failures=$((failures + 1))
+  _agents_remove_stale_extension_link "$root" "projects.ts" || failures=$((failures + 1))
+  _agents_remove_stale_extension_link "$root" "worktree.ts" || failures=$((failures + 1))
   _agents_link_opencode_config "$root" || failures=$((failures + 1))
   _agents_ensure_agent_tools || failures=$((failures + 1))
   _agents_ensure_gh_slack || failures=$((failures + 1))
