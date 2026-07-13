@@ -1,19 +1,14 @@
 /**
- * /projects — open projects, manage workstreams
- * /ws       — workstream picker and management
+ * /ws — project and workstream picker/management
  *
  * Projects are parent repos/contexts identified by git remote origin URL or
  * real path. Workstreams are focused task contexts backed by git worktrees,
  * Pi conversations, and optional cmux workspaces.
  *
- * /projects [query]      open a project by selecting or creating a workstream
- * /projects new [task]   create a new workstream in the current project
- * /projects list         list discovered projects
- * /ws                    interactive workstream picker for current project
- * /ws list               list workstreams in current project (or all registered)
- * /ws remove [name]      remove a linked workstream
- * /ws delete             remove the current linked workstream and end Pi conversation
- * /ws fork [name]        fork current WIP into a new workstream
+ * /ws                   pick/open a Project, then pick/create a Workstream
+ * /ws new [task]        create a Workstream in the current Project, or choose one
+ * /ws end               remove the current linked Workstream and end Pi conversation
+ * /ws fork [name]        fork current WIP into a new Workstream
  */
 
 import {
@@ -57,6 +52,7 @@ import {
 const WORKSTREAM_STATUS_KEY = "workstream";
 const NEW_WORKSTREAM_ID = "__new__";
 const PRIMARY_ID = "__primary__";
+const SWITCH_PROJECT_ID = "__switch_project__";
 
 export default function workstreamsExtension(pi: ExtensionAPI) {
 	// ── Session lifecycle ────────────────────────────────────────────────────
@@ -268,7 +264,7 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 			"",
 			...projects.map((p) => `- ${p.label} — ${p.path}`),
 			"",
-			"Open one with `/projects <name>`.",
+			"Open one with `/ws <name>`.",
 		].join("\n");
 		pi.sendMessage({
 			customType: "projects-list",
@@ -339,7 +335,7 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 
 	/**
 	 * Show a workstream picker for the given project.
-	 * Items: New workstream…, primary checkout, linked worktrees.
+	 * Items: New Workstream…, Switch Project…, primary checkout, linked Workstreams.
 	 * Returns the selected item id, or undefined on cancel.
 	 */
 	async function selectWorkstream(
@@ -358,7 +354,12 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		}
 		const itemMetas: ItemMeta[] = [];
 
-		itemMetas.push({ id: NEW_WORKSTREAM_ID, label: "New workstream…", description: "" });
+		itemMetas.push({ id: NEW_WORKSTREAM_ID, label: "New Workstream…", description: "" });
+		itemMetas.push({
+			id: SWITCH_PROJECT_ID,
+			label: "Switch Project…",
+			description: "Choose a different Project",
+		});
 
 		if (mainWorktree) {
 			const branch = mainWorktree.branch ?? (mainWorktree.detached ? "detached" : "unknown");
@@ -481,12 +482,12 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		if (linked.length === 0) {
 			if (ctx.hasUI) {
 				const choice = await ctx.ui.select(
-					`${project.name} — No workstreams yet`,
-					["Create first workstream…", "Open primary checkout", "Cancel"],
+					`${project.name} — No Workstreams yet`,
+					["Create first Workstream…", "Switch Project…", "Open primary checkout", "Cancel"],
 				);
-				if (choice === "Create first workstream…") {
+				if (choice === "Create first Workstream…") {
 					const task =
-						(await ctx.ui.input("New workstream task", "add oauth login"))?.trim() ?? "";
+						(await ctx.ui.input("New Workstream task", "add oauth login"))?.trim() ?? "";
 					if (!task) return;
 					await doCreateWorkstream(
 						ctx,
@@ -494,12 +495,14 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 						mainWorktree?.path ?? project.path,
 						task,
 					);
+				} else if (choice === "Switch Project…") {
+					await openProjectByQuery(ctx, "");
 				} else if (choice === "Open primary checkout") {
 					await openPrimaryCheckout(ctx, project, mainWorktree);
 				}
 			} else {
 				ctx.ui.notify(
-					`No workstreams in ${project.name}. Run /projects new <task> to create one.`,
+					`No Workstreams in ${project.name}. Run /ws new <task> to create one.`,
 					"info",
 				);
 			}
@@ -529,7 +532,7 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 					return `- ${task} — ${wt.branch ?? wt.path}`;
 				}),
 				"",
-				"Use /projects <project> with UI to open one, or /projects new <task> to create one.",
+				"Run `/ws` in an interactive session to open one, or `/ws new <task>` to create one.",
 			];
 			pi.sendMessage({
 				customType: "workstream-list",
@@ -545,9 +548,11 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 
 		if (selected === NEW_WORKSTREAM_ID) {
 			const task =
-				(await ctx.ui.input("New workstream task", "add oauth login"))?.trim() ?? "";
+				(await ctx.ui.input("New Workstream task", "add oauth login"))?.trim() ?? "";
 			if (!task) return;
 			await doCreateWorkstream(ctx, project, mainWorktree?.path ?? project.path, task);
+		} else if (selected === SWITCH_PROJECT_ID) {
+			await openProjectByQuery(ctx, "");
 		} else if (selected === PRIMARY_ID) {
 			await openPrimaryCheckout(ctx, project, mainWorktree);
 		} else {
@@ -562,10 +567,12 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		}
 	}
 
-	// ── /projects command ─────────────────────────────────────────────────────
+	// ── Project routing helpers ───────────────────────────────────────────────
 
-	const projectsHandler = async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
-		const query = args.trim();
+	async function openProjectByQuery(
+		ctx: ExtensionCommandContext,
+		query: string,
+	): Promise<void> {
 		const allProjects = discoverProjects();
 
 		if (allProjects.length === 0) {
@@ -573,39 +580,6 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 			return;
 		}
 
-		// /projects list
-		if (query === "list" || query === "ls") {
-			sendProjectsList(allProjects);
-			return;
-		}
-
-		// /projects new [task]
-		if (query === "new" || query.startsWith("new ")) {
-			const taskFromArgs = query === "new" ? "" : query.slice(4).trim();
-			let task = taskFromArgs;
-
-			if (!task) {
-				if (ctx.hasUI) {
-					task = (await ctx.ui.input("New workstream task", "add oauth login"))?.trim() ?? "";
-				}
-				if (!task) {
-					ctx.ui.notify("Usage: /projects new <task>", "warning");
-					return;
-				}
-			}
-
-			const mainRoot = await resolveMainRoot(ctx.cwd);
-			if (!mainRoot) {
-				ctx.ui.notify("/projects new requires a git repository", "error");
-				return;
-			}
-
-			const project = projectInfoForPath(mainRoot);
-			await doCreateWorkstream(ctx, project, mainRoot, task);
-			return;
-		}
-
-		// /projects with no args — show project picker
 		if (!query) {
 			if (!ctx.hasUI) {
 				sendProjectsList(allProjects);
@@ -617,10 +591,9 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 			return;
 		}
 
-		// /projects <query> — search and open
 		const matches = findProjects(allProjects, query);
 		if (matches.length === 0) {
-			ctx.ui.notify("No matching project found", "error");
+			ctx.ui.notify(`No matching Project found: ${query}`, "error");
 			return;
 		}
 
@@ -628,28 +601,60 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		if (matches.length === 1 || !ctx.hasUI) {
 			project = matches[0];
 		} else {
-			const picked = await selectProject(ctx, matches, "Matching projects");
+			const picked = await selectProject(ctx, matches, "Matching Projects");
 			if (!picked) return;
 			project = picked;
 		}
 
 		await openProjectWorkstreams(ctx, project);
-	};
+	}
 
-	pi.registerCommand("projects", {
-		description:
-			"Open a project and manage its workstreams · /projects [query] · /projects new [task] · /projects list",
-		getArgumentCompletions: (prefix) => {
-			const clean = prefix.trim();
-			const builtins = ["list", "new"].filter((c) => c.startsWith(clean.toLowerCase()));
-			const projectMatches = clean ? findProjects(discoverProjects(), clean) : discoverProjects();
-			return [
-				...builtins.map((v) => ({ value: v, label: v })),
-				...projectMatches.map((p) => ({ value: p.label, label: p.label })),
-			].slice(0, 25);
-		},
-		handler: projectsHandler,
-	});
+	async function createWorkstreamFromCurrentOrPickedProject(
+		ctx: ExtensionCommandContext,
+		taskFromArgs: string,
+	): Promise<void> {
+		let task = taskFromArgs.trim();
+		if (!task && ctx.hasUI) {
+			task = (await ctx.ui.input("New Workstream task", "add oauth login"))?.trim() ?? "";
+		}
+		if (!task) {
+			ctx.ui.notify("Usage: /ws new <task>", "warning");
+			return;
+		}
+
+		let mainRoot = await resolveMainRoot(ctx.cwd);
+		let project: ProjectInfo | undefined;
+
+		if (mainRoot) {
+			project = projectInfoForPath(mainRoot);
+		} else {
+			if (!ctx.hasUI) {
+				ctx.ui.notify(
+					"/ws new requires a git repository, or an interactive Project picker",
+					"error",
+				);
+				return;
+			}
+
+			const projects = discoverProjects();
+			if (projects.length === 0) {
+				ctx.ui.notify("No project folders found", "warning");
+				return;
+			}
+
+			const picked = await selectProject(ctx, projects, "Choose Project");
+			if (!picked) return;
+
+			mainRoot = await resolveMainRoot(picked.path);
+			if (!mainRoot) {
+				ctx.ui.notify("Workstream creation requires a git repository", "error");
+				return;
+			}
+			project = projectInfoForPath(mainRoot, picked.label);
+		}
+
+		await doCreateWorkstream(ctx, project, mainRoot, task);
+	}
 
 	// ── /ws command ───────────────────────────────────────────────────────────
 
@@ -818,29 +823,6 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		return views;
 	}
 
-	/** Build WorkstreamViews from registry records alone (no live git context). */
-	function buildRegistryViews(workstreams: WorkstreamRecord[]): WorkstreamView[] {
-		return workstreams.map((record) => {
-			const project: ProjectInfo = {
-				name: record.projectName,
-				label: record.projectName,
-				path: record.projectPath,
-				remoteUrl: record.projectRemoteUrl,
-				projectId: record.projectId,
-			};
-			return {
-				record,
-				project,
-				task: record.task,
-				slug: record.slug,
-				branch: record.branch,
-				worktreePath: record.worktreePath,
-				primary: record.primary,
-				current: false,
-				active: false,
-			};
-		});
-	}
 
 	function workstreamDisplayName(view: WorkstreamView): string {
 		return view.primary ? "Primary checkout" : view.task;
@@ -865,18 +847,6 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		return `${view.project.name} · ${workstreamDisplayName(view)} — branch: ${view.branch || "none"}${suffix}`;
 	}
 
-	/** Find a view by slug, task, branch, basename, or full path. */
-	function findViewByName(views: WorkstreamView[], name: string): WorkstreamView | undefined {
-		const clean = name.trim();
-		if (!clean) return undefined;
-		return (
-			views.find((v) => v.slug === clean) ??
-			views.find((v) => v.task.toLowerCase() === clean.toLowerCase()) ??
-			views.find((v) => v.branch === clean || v.branch === `wt/${clean}`) ??
-			views.find((v) => path.basename(v.worktreePath) === clean) ??
-			views.find((v) => samePath(v.worktreePath, clean))
-		);
-	}
 
 	// -- Workstream removal --
 
@@ -950,56 +920,6 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		}
 		ctx.ui.notify(summary, "info");
 		return true;
-	}
-
-	// -- Text list --
-
-	function sendWorkstreamList(views: WorkstreamView[]): void {
-		if (views.length === 0) {
-			pi.sendMessage({
-				customType: "ws-list",
-				content: [
-					{
-						type: "text",
-						text: "No workstreams found.\n\nUse `/projects new <task>` to create one.",
-					},
-				],
-				display: "user",
-			});
-			return;
-		}
-
-		const lines: string[] = ["Workstreams", ""];
-
-		const byProject = new Map<string, WorkstreamView[]>();
-		for (const v of views) {
-			const key = v.project.name;
-			if (!byProject.has(key)) byProject.set(key, []);
-			byProject.get(key)!.push(v);
-		}
-
-		for (const [projectName, projectViews] of byProject) {
-			if (byProject.size > 1) lines.push(`**${projectName}**`, "");
-			for (const v of projectViews) {
-				const labels = workstreamStateLabels(v, { includePaused: true });
-				const suffix = labels.length > 0 ? ` (${labels.join(", ")})` : "";
-				const pathStr = v.worktree ? v.worktreePath : `${v.worktreePath} (missing)`;
-				lines.push(`- **${workstreamDisplayName(v)}**${suffix}`);
-				lines.push(`  Branch: \`${v.branch || "none"}\``);
-				lines.push(`  Path: ${pathStr}`);
-			}
-			lines.push("");
-		}
-
-		lines.push(
-			"Usage: `/ws` to pick/open · `/ws remove <name>` to remove · `/ws delete` to remove current · `/ws fork [name]` to fork WIP",
-		);
-
-		pi.sendMessage({
-			customType: "ws-list",
-			content: [{ type: "text", text: lines.join("\n") }],
-			display: "user",
-		});
 	}
 
 	// -- Interactive picker --
@@ -1268,28 +1188,15 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		const nameTokens = rest.filter((t) => !t.startsWith("-"));
 		const targetName = nameTokens.join(" ");
 
-		// Unknown subcommand — warn with usage; do not create workstreams from /ws
-		const knownSubs = new Set(["list", "ls", "remove", "rm", "delete", "fork", ""]);
+		const knownSubs = new Set(["new", "end", "fork", ""]);
 		if (!knownSubs.has(sub)) {
-			const usage = [
-				`Unknown subcommand: \`${sub}\`. Use one of:`,
-				"- `/ws` — pick and open a workstream",
-				"- `/ws list` — list workstreams",
-				"- `/ws remove [name]` — remove a workstream",
-				"- `/ws delete` — remove current linked workstream",
-				"- `/ws fork [name]` — fork current WIP into a new workstream",
-				"",
-				"To create a workstream, use `/projects new <task>`.",
-			].join("\n");
-			if (ctx.hasUI) {
-				ctx.ui.notify(`Unknown subcommand: ${sub}`, "warning");
-			} else {
-				pi.sendMessage({
-					customType: "ws-usage",
-					content: [{ type: "text", text: usage }],
-					display: "user",
-				});
-			}
+			ctx.ui.notify(`Unsupported subcommand: ${sub}. Use /ws, /ws new, or /ws end.`, "warning");
+			return;
+		}
+
+		// /ws new [task]
+		if (sub === "new") {
+			await createWorkstreamFromCurrentOrPickedProject(ctx, targetName);
 			return;
 		}
 
@@ -1316,69 +1223,10 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 			project = projectInfoForPath(mainRoot);
 		}
 
-		// /ws list
-		if (sub === "list" || sub === "ls") {
-			if (mainRoot && project) {
-				const { workstreams } = readRegistry();
-				const records = workstreams.filter((r) => r.projectId === project!.projectId);
-				const views = await buildWorkstreamViews(
-					mainRoot, project, worktreeList, records, currentRoot ?? ctx.cwd,
-				);
-				sendWorkstreamList(views);
-			} else {
-				const { workstreams } = readRegistry();
-				sendWorkstreamList(buildRegistryViews(workstreams));
-			}
-			return;
-		}
-
-		// /ws remove [name]
-		if (sub === "remove" || sub === "rm") {
-			if (!mainRoot || !project) {
-				ctx.ui.notify("/ws remove requires a git repository", "error");
-				return;
-			}
-			const { workstreams } = readRegistry();
-			const records = workstreams.filter((r) => r.projectId === project!.projectId);
-			const views = await buildWorkstreamViews(
-				mainRoot, project, worktreeList, records, currentRoot ?? ctx.cwd,
-			);
-
-			let target: WorkstreamView | undefined;
-			if (targetName) {
-				target = findViewByName(views, targetName);
-				if (!target) {
-					ctx.ui.notify(`No workstream found matching: ${targetName}`, "error");
-					return;
-				}
-			} else if (ctx.hasUI) {
-				const removable = views.filter((v) => !v.primary && v.worktree);
-				if (removable.length === 0) {
-					ctx.ui.notify("No linked workstreams available to remove", "info");
-					return;
-				}
-				const choices = removable.map((v) => workstreamPickerLabel(v));
-				const choice = await ctx.ui.select("Remove workstream", choices);
-				if (!choice) return;
-				target = removable[choices.indexOf(choice)];
-			} else {
-				ctx.ui.notify("Usage: /ws remove <name>", "warning");
-				return;
-			}
-
-			if (!target) return;
-			if (target.primary) {
-				ctx.ui.notify("Cannot remove the primary checkout", "error");
-				return;
-			}
-			await doRemoveWorkstream(ctx, target, mainRoot, worktreeList, { force, yes });
-			return;
-		}
-
-		// /ws delete
-		if (sub === "delete") {
+		// /ws end
+		if (sub === "end") {
 			if (!currentRoot || !mainRoot || !project) {
-				ctx.ui.notify("/ws delete requires a git repository", "error");
+				ctx.ui.notify("/ws end requires a git repository", "error");
 				return;
 			}
 			const { workstreams } = readRegistry();
@@ -1387,7 +1235,7 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 
 			const current = views.find((v) => v.current);
 			if (!current || current.primary) {
-				ctx.ui.notify("/ws delete only works from inside a linked workstream", "error");
+				ctx.ui.notify("/ws end only works from inside a linked Workstream", "error");
 				return;
 			}
 
@@ -1447,35 +1295,20 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 			return;
 		}
 
-		// /ws with no args — interactive picker or text list
+		// /ws with no args — current Project if possible, otherwise Project picker.
 		if (mainRoot && project) {
-			const { workstreams } = readRegistry();
-			const records = workstreams.filter((r) => r.projectId === project!.projectId);
-			const views = await buildWorkstreamViews(
-				mainRoot, project, worktreeList, records, currentRoot ?? ctx.cwd,
-			);
-			if (ctx.hasUI) {
-				await wsInteractivePicker(ctx, views, mainRoot, worktreeList);
-			} else {
-				sendWorkstreamList(views);
-			}
+			await openProjectWorkstreams(ctx, project);
 		} else {
-			const { workstreams } = readRegistry();
-			const views = buildRegistryViews(workstreams);
-			if (ctx.hasUI && views.length > 0) {
-				await wsInteractivePicker(ctx, views, null, []);
-			} else {
-				sendWorkstreamList(views);
-			}
+			await openProjectByQuery(ctx, "");
 		}
 	};
 
 	pi.registerCommand("ws", {
 		description:
-			"Manage workstreams · /ws list · /ws remove [name] · /ws delete · /ws fork [name]",
+			"Open Projects and manage Workstreams · /ws · /ws new [task] · /ws end",
 		getArgumentCompletions: (prefix) => {
 			const clean = prefix.trim();
-			return ["list", "remove", "delete", "fork"]
+			return ["new", "end", "fork"]
 				.filter((c) => c.startsWith(clean.toLowerCase()))
 				.map((v) => ({ value: v, label: v }));
 		},

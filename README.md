@@ -142,26 +142,24 @@ origin URL or real path. A **Workstream** is a focused task context inside a
 Project: an isolated git branch and checkout, a dedicated Pi conversation, and
 an optional cmux workspace.
 
-Use `/projects` to open a Project and pick or create a Workstream. Use `/ws`
-to manage Workstreams from inside one.
+Use `/ws` for both Project selection and Workstream management. If you run
+it inside a Project, it opens that Project's Workstreams and includes a
+`Switch Project…` option. If you run it outside a Project, it asks which
+Project to open.
 
 | Command | What it does |
 |---|---|
-| `/projects [query]` | Open a Project by name, then pick or create a Workstream. |
-| `/projects new [task]` | Create a new Workstream in the current Project. |
-| `/projects list` | List all discovered Projects. |
-| `/ws` | Interactive picker to open or manage Workstreams in the current Project. |
-| `/ws list` | Text list of Workstreams in the current Project (or all registered). |
-| `/ws remove [name]` | Safely remove a named Workstream, with a prompt for branch deletion. |
-| `/ws delete` | Remove the current linked Workstream and end the Pi conversation. |
+| `/ws` | Pick, open, or remove a Workstream, with Project selection when needed. |
+| `/ws new [task]` | Create a new Workstream in the current Project, or choose a Project. |
+| `/ws end` | Remove the current linked Workstream and end the Pi conversation. |
 | `/ws fork [name]` | Copy current WIP into a new independent Workstream without touching the source. |
 
 `/ws fork` carries over uncommitted tracked changes and untracked files, so you
 can start a new branch from the exact state of your current checkout. The source
 branch is not modified.
 
-The `/worktree` command was intentionally removed. Git worktrees are now
-implementation details managed behind Workstreams.
+The old `/projects` and `/worktree` commands were intentionally removed.
+Projects are still part of the model, but `/ws` is the only command surface.
 
 Pi is configured to use GitHub Copilot models by default. The first time you run
 it, authenticate Pi itself:
