@@ -125,11 +125,17 @@ function extractWorkspaceRef(output: string): string | null {
 	return match ? `workspace:${match[1]}` : null;
 }
 
+function getProjectNameForWorktree(worktreePath: string): string {
+	const parentName = path.basename(path.dirname(worktreePath));
+	const repoName = parentName.replace(/(?:\.worktrees|-worktrees)$/, "");
+	if (repoName && repoName !== parentName) return repoName;
+	return path.basename(worktreePath) || "project";
+}
+
 function getWorkspaceTitle(worktreePath: string): string {
-	const repoWorktreesDir = path.basename(path.dirname(worktreePath));
-	const repoName = repoWorktreesDir.replace(/(?:\.worktrees|-worktrees)$/, "");
+	const repoName = getProjectNameForWorktree(worktreePath);
 	const slug = path.basename(worktreePath);
-	return `${repoName} · ${slug}`;
+	return slug === repoName ? repoName : `${repoName} · ${slug}`;
 }
 
 function sessionNameForWorktree(worktree: WorktreeInfo): string {
@@ -282,6 +288,73 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	type CmuxWorkspaceTarget = { id?: string; ref?: string };
+	type CmuxWorkspaceGroup = {
+		id?: string;
+		ref?: string;
+		group_ref?: string;
+		workspace_group_ref?: string;
+		name?: string;
+		title?: string;
+		label?: string;
+		display_name?: string;
+	};
+
+	function cmuxWorkspaceGroupRef(group: CmuxWorkspaceGroup): string | undefined {
+		return group.ref ?? group.group_ref ?? group.workspace_group_ref ?? group.id;
+	}
+
+	function cmuxWorkspaceGroupName(group: CmuxWorkspaceGroup): string | undefined {
+		return group.name ?? group.title ?? group.label ?? group.display_name;
+	}
+
+	function parseCmuxWorkspaceGroup(output: string): CmuxWorkspaceGroup | undefined {
+		const trimmed = output.trim();
+		if (!trimmed) return undefined;
+		try {
+			const parsed = JSON.parse(trimmed) as CmuxWorkspaceGroup | { group?: CmuxWorkspaceGroup; groups?: CmuxWorkspaceGroup[] };
+			if ("group" in parsed && parsed.group) return parsed.group;
+			if ("groups" in parsed && parsed.groups?.[0]) return parsed.groups[0];
+			return parsed as CmuxWorkspaceGroup;
+		} catch {
+			const match = trimmed.match(/workspace_group:\S+/);
+			return match ? { ref: match[0] } : undefined;
+		}
+	}
+
+	async function listCmuxWorkspaceGroups(): Promise<CmuxWorkspaceGroup[]> {
+		const result = await pi.exec("cmux", ["workspace-group", "list", "--json"]);
+		if (result.code !== 0 || !result.stdout.trim()) return [];
+		try {
+			const parsed = JSON.parse(result.stdout) as { groups?: CmuxWorkspaceGroup[] };
+			return parsed.groups ?? [];
+		} catch {
+			return [];
+		}
+	}
+
+	async function findCmuxWorkspaceGroupByName(name: string): Promise<CmuxWorkspaceGroup | undefined> {
+		const groups = await listCmuxWorkspaceGroups();
+		return groups.find((group) => cmuxWorkspaceGroupName(group) === name);
+	}
+
+	async function ensureCmuxWorkspaceGroupForWorktree(worktreePath: string): Promise<string | undefined> {
+		if (!isCmux() || !process.env.CMUX_WORKSPACE_ID) return undefined;
+
+		const projectName = getProjectNameForWorktree(worktreePath);
+		const existing = await findCmuxWorkspaceGroupByName(projectName);
+		const existingRef = existing ? cmuxWorkspaceGroupRef(existing) : undefined;
+		if (existingRef) return existingRef;
+
+		const createResult = await pi.exec("cmux", ["workspace-group", "create", "--name", projectName, "--json"]);
+		if (createResult.code !== 0) return undefined;
+
+		const created = parseCmuxWorkspaceGroup(createResult.stdout || createResult.stderr || "");
+		const createdRef = created ? cmuxWorkspaceGroupRef(created) : undefined;
+		if (createdRef) return createdRef;
+
+		const reloaded = await findCmuxWorkspaceGroupByName(projectName);
+		return reloaded ? cmuxWorkspaceGroupRef(reloaded) : undefined;
+	}
 
 	async function findCmuxWorkspaceForPath(worktreePath: string): Promise<CmuxWorkspaceTarget | undefined> {
 		if (!isCmux()) return undefined;
@@ -345,7 +418,8 @@ export default function (pi: ExtensionAPI) {
 		if (!isCmux()) return { launched: false };
 
 		const piCommand = formatPiCommand(task, launchMode);
-		const createResult = await pi.exec("cmux", [
+		const groupRef = await ensureCmuxWorkspaceGroupForWorktree(worktreePath);
+		const createArgs = [
 			"new-workspace",
 			"--cwd",
 			worktreePath,
@@ -353,7 +427,12 @@ export default function (pi: ExtensionAPI) {
 			piCommand,
 			"--focus",
 			"true",
-		]);
+		];
+		if (groupRef) {
+			createArgs.push("--group", groupRef, "--group-placement", "afterCurrent");
+			if (process.env.CMUX_WORKSPACE_ID) createArgs.push("--group-reference", process.env.CMUX_WORKSPACE_ID);
+		}
+		const createResult = await pi.exec("cmux", createArgs);
 		if (createResult.code !== 0) {
 			return {
 				launched: false,

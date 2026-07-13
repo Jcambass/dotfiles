@@ -135,13 +135,54 @@ function piCommand(project: ProjectInfo): string {
 }
 
 export default function projectsExtension(pi: ExtensionAPI) {
+	type CmuxWorkspaceGroup = {
+		id?: string;
+		ref?: string;
+		group_ref?: string;
+		workspace_group_ref?: string;
+		name?: string;
+		title?: string;
+		label?: string;
+		display_name?: string;
+	};
+
+	function cmuxWorkspaceGroupRef(group: CmuxWorkspaceGroup): string | undefined {
+		return group.ref ?? group.group_ref ?? group.workspace_group_ref ?? group.id;
+	}
+
+	function cmuxWorkspaceGroupName(group: CmuxWorkspaceGroup): string | undefined {
+		return group.name ?? group.title ?? group.label ?? group.display_name;
+	}
+
+	async function listCmuxWorkspaceGroups(): Promise<CmuxWorkspaceGroup[]> {
+		const result = await pi.exec("cmux", ["workspace-group", "list", "--json"]);
+		if (result.code !== 0 || !result.stdout.trim()) return [];
+		try {
+			const parsed = JSON.parse(result.stdout) as { groups?: CmuxWorkspaceGroup[] };
+			return parsed.groups ?? [];
+		} catch {
+			return [];
+		}
+	}
+
+	async function findCmuxWorkspaceGroupRefByName(name: string): Promise<string | undefined> {
+		const groups = await listCmuxWorkspaceGroups();
+		const group = groups.find((group) => cmuxWorkspaceGroupName(group) === name);
+		return group ? cmuxWorkspaceGroupRef(group) : undefined;
+	}
+
+	async function createCmuxWorkspaceGroupFromWorkspace(name: string, workspaceRef: string): Promise<void> {
+		await pi.exec("cmux", ["workspace-group", "create", "--name", name, "--from", workspaceRef, "--json"]);
+	}
+
 	async function launchProject(ctx: ExtensionCommandContext, project: ProjectInfo): Promise<void> {
 		if (!isCmux()) {
 			ctx.ui.notify("/projects requires cmux", "error");
 			return;
 		}
 
-		const result = await pi.exec("cmux", [
+		const groupRef = await findCmuxWorkspaceGroupRefByName(project.name);
+		const createArgs = [
 			"workspace",
 			"create",
 			"--name",
@@ -152,7 +193,9 @@ export default function projectsExtension(pi: ExtensionAPI) {
 			piCommand(project),
 			"--focus",
 			"true",
-		]);
+		];
+		if (groupRef) createArgs.push("--group", groupRef, "--group-placement", "end");
+		const result = await pi.exec("cmux", createArgs);
 
 		if (result.code !== 0) {
 			const reason = result.stderr.trim() || result.stdout.trim() || "failed to create cmux workspace";
@@ -162,6 +205,7 @@ export default function projectsExtension(pi: ExtensionAPI) {
 
 		const workspaceRef = extractWorkspaceRef(result.stdout || result.stderr || "");
 		if (workspaceRef) {
+			if (!groupRef) await createCmuxWorkspaceGroupFromWorkspace(project.name, workspaceRef);
 			await sleep(200);
 			await pi.exec("cmux", ["workspace", "select", workspaceRef]);
 		}
