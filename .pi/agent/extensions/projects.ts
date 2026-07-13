@@ -8,7 +8,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { Container, SettingsList, Text, type SettingItem } from "@earendil-works/pi-tui";
 
 interface ProjectInfo {
 	name: string;
@@ -176,10 +177,45 @@ export default function projectsExtension(pi: ExtensionAPI) {
 	}
 
 	async function selectProject(ctx: ExtensionCommandContext, projects: ProjectInfo[], title = "Projects"): Promise<ProjectInfo | undefined> {
-		const labels = new Map<string, ProjectInfo>();
-		for (const project of projects) labels.set(project.label, project);
-		const selected = await ctx.ui.select(title, [...labels.keys()]);
-		return selected ? labels.get(selected) : undefined;
+		const projectById = new Map(projects.map((project) => [project.path, project]));
+
+		return ctx.ui.custom<ProjectInfo | undefined>((_tui, theme, _kb, done) => {
+			const container = new Container();
+			container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+			container.addChild(new Text(
+				theme.fg("accent", theme.bold(` ${title}`)) + theme.fg("muted", ` • ${projects.length} projects`),
+				0, 0,
+			));
+
+			const items: SettingItem[] = projects.map((project) => ({
+				id: project.path,
+				label: project.label,
+				description: project.path,
+				currentValue: "open",
+				values: ["open"],
+			}));
+
+			const settingsList = new SettingsList(items, Math.min(projects.length, 15), {
+				label: (text, selected) => selected ? theme.fg("accent", text) : text,
+				value: (text, selected) => selected ? theme.fg("accent", text) : theme.fg("muted", text),
+				description: (text) => theme.fg("muted", text),
+				cursor: theme.fg("accent", "→ "),
+				hint: (text) => theme.fg("dim", text),
+			}, (id) => {
+				done(projectById.get(id));
+			}, () => done(undefined), { enableSearch: true });
+			container.addChild(settingsList);
+			container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+			return {
+				render: (width) => container.render(width),
+				invalidate: () => container.invalidate(),
+				handleInput: (data) => {
+					settingsList.handleInput(data);
+					_tui.requestRender();
+				},
+			};
+		});
 	}
 
 	const handler = async (args: string, ctx: ExtensionCommandContext) => {
@@ -201,13 +237,7 @@ export default function projectsExtension(pi: ExtensionAPI) {
 				sendProjectsList(projects);
 				return;
 			}
-			const search = (await ctx.ui.input("Project search", "enterprise2"))?.trim() ?? "";
-			const matches = search ? findProjects(projects, search) : projects;
-			if (matches.length === 0) {
-				ctx.ui.notify("No matching project found", "error");
-				return;
-			}
-			project = matches.length === 1 ? matches[0] : await selectProject(ctx, matches, search ? `Projects matching ${search}` : "Projects");
+			project = await selectProject(ctx, projects);
 		} else {
 			const matches = findProjects(projects, query);
 			if (matches.length === 0) {
