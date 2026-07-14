@@ -36,6 +36,8 @@ Keep progress updates short and factual. Do not expose private chain-of-thought;
 
 For small tasks, just do the work.
 
+When a user includes a link, read the linked context before answering or drafting from it. Use the right source-specific tool for the link, for example `gh` for GitHub links, instead of guessing from the URL or surrounding prompt.
+
 ## Writing on my behalf
 
 Before drafting or publishing user-visible prose on my behalf, load and apply:
