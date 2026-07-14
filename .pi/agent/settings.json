@@ -1,6 +1,6 @@
 {
   "defaultProvider": "github-copilot",
-  "defaultModel": "gpt-5.5",
+  "defaultModel": "claude-sonnet-5",
   "defaultThinkingLevel": "high",
   "editorPaddingX": 2,
   "hideThinkingBlock": true,
@@ -17,11 +17,9 @@
     "keepRecentTokens": 30000
   },
   "enabledModels": [
-    "claude-*-4.6",
-    "claude-*-4.7",
-    "claude-*-4.8",
-    "gpt-5.5",
-    "gemini-3.1*"
+    "claude-sonnet-5",
+    "claude-opus-4.8",
+    "gpt-5.5"
   ],
   "lastChangelogVersion": "99.99.99",
   "packages": [
