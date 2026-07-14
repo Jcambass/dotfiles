@@ -220,8 +220,15 @@ function listFiles(files: Set<string>, limit: number = 3): string {
 // ── extension ────────────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+	// Prefix notification titles with the session/workstream name so
+	// notifications from different cmux workspaces can be told apart.
+	function withWorkstream(title: string): string {
+		const name = pi.getSessionName()?.replace(/\s+/g, " ").trim() || basename(process.cwd());
+		return name ? `${title} · ${name}` : title;
+	}
+
 	pi.events.on(attentionNotificationEvent, (event: AttentionNotification) => {
-		notify(event.title, event.body, event.subtitle);
+		notify(withWorkstream(event.title), event.body, event.subtitle);
 		if (event.logMessage) {
 			cmuxLog(event.logMessage, event.level ?? "warning");
 		}
@@ -464,12 +471,12 @@ export default function (pi: ExtensionAPI) {
 		if (errorsThisLoop > 0) {
 			cmuxSetStatus("pi", "done (errors)", "exclamationmark.triangle.fill", "#ff3b30");
 			cmuxLog(`${body} (${errorsThisLoop} error${errorsThisLoop !== 1 ? "s" : ""})`, "warning");
-			notify("Pi", body, "Errors");
+			notify(withWorkstream("Pi"), body, "Errors");
 			cmuxSetTabColor("Red");
 		} else {
 			cmuxSetStatus("pi", "idle", "checkmark.circle.fill", "#34c759");
 			cmuxLog(body, "success");
-			notify("Pi", body);
+			notify(withWorkstream("Pi"), body);
 			cmuxSetTabColor("Green");
 		}
 
