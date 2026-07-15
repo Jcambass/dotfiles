@@ -39,6 +39,75 @@ without explicit approval.
 - Nested application configs live in `common/apps`. Keep macOS-only app configs
   gated there instead of linking them on bp-dev or Codespaces.
 
+## Pi agent linking model
+
+- `.pi/agent` is symlinked **per-file** from the repo into `~/.pi/agent`
+  (`_agents_link_tree()` in `common/agents/install.sh`) — an **allowlist**:
+  only paths that exist in the repo ever get symlinked. Do not switch this to
+  symlinking `~/.pi/agent` as a single directory; that flips the model to a
+  denylist and has already been evaluated and rejected. Real, untracked files
+  already live directly in `~/.pi/agent` today (e.g. `mcp.json`,
+  `workstream-registry.json`, `npm/`, `ayu/`) — safe only because the
+  directory itself isn't a single symlinked unit, so the linker's per-item
+  loop never even considers them (they don't exist in the repo source).
+- **There is no path-exclusion list in `install.sh`**, and none is needed:
+  paths like `auth.json`, `trust.json`, `sessions/`, `bin/`, `config/`, `gh/`
+  simply never exist in the repo's tracked `.pi/agent` tree, so the linker's
+  `for item in "$src_dir"/*` loop never encounters them. Keeping those paths
+  out of the repo's own `git status` is root `.gitignore`'s job alone — plain
+  git hygiene, already fully effective on its own. Do not add a parallel
+  enforcement mechanism in `install.sh` for this; by the time such a file
+  exists inside the tracked repo tree, `.gitignore` has already done (or
+  failed to do) the only thing that actually matters — whether `git status`/
+  `git add -A` would pick it up. A symlink-skip check in `install.sh` cannot
+  retroactively fix that, so it isn't worth the extra code.
+- **`script/pi-agent-doctor`'s drift audit does not use `.gitignore` either.**
+  It only ever looks inside a top-level name under `~/.pi/agent` (or
+  `~/.agents`) if that same name also exists in the repo (`extensions/`,
+  `agents/`, `prompts/`, `settings.json`, ...). Anything else — `npm/`,
+  `ayu/`, `mcp-oauth/`, `subagent-runs/`, `sessions/`, or whatever Pi invents
+  next — is Pi/tool-owned local state with no repo-side counterpart, so it's
+  out of scope automatically, with nothing to add to any list as Pi evolves.
+  This was a deliberate choice over gitignore-driven scoping: a denylist of
+  "known local Pi state" requires updating every time Pi ships something new
+  (discovered live: `.agents/.skill-lock.json` and `~/.pi/agent/npm/` were
+  both missed on the first pass); an allowlist derived from "does the repo
+  have this" never goes stale.
+- `~/.agents` has a *different* linking mode than `~/.pi/agent`:
+  `_agents_link_global_agents()` symlinks the whole directory as one unit
+  when possible (falling back to per-file linking only if `~/.agents`
+  already exists as a real directory). `script/pi-agent-doctor` checks for
+  this (`[ -L "$home_dir" ]`) and reports clean immediately in the
+  whole-directory case — there's nothing to audit per-file when it's one
+  symlink.
+- **The atomic-write hazard**: never place a private/local companion file
+  for a tracked extension at a path *inside* `~/.pi/agent` that might ever be
+  symlinked, if the file is rewritten by any tool (ours or third-party) using
+  a temp-file-then-rename pattern (`writeFileSync(tmp); rename(tmp, dest)`).
+  `rename()` replaces whatever is at `dest`, including deleting a symlink and
+  putting a real file in its place — silently, with no error. Confirmed
+  present in `pi-mcp-adapter`'s `config.ts`/`metadata-cache.ts` (writes
+  `mcp.json`/`mcp-cache.json`) and in this repo's own
+  `.pi/agent/extensions/lib/workstreams.ts` `writeRegistryAtomic()` (writes
+  `workstream-registry.json`). A gitignored "private/" redirect folder was
+  tried for exactly this kind of file and reverted — see git log
+  `8265de9`/`a84e7a6` if the full history is ever needed.
+- **The one safe "split" pattern** for generic tracked code plus a
+  private/local companion file: the companion file lives at a path
+  **entirely outside** `~/.pi/agent` (e.g. `~/.config/pi/<name>.json`),
+  located via an env var with a documented default, and the extension treats
+  "file missing" as a silent no-op. This works because the file is never
+  present in the repo at all, so the linker never touches its path. Canonical
+  example: `.pi/agent/extensions/kusto-command.ts` (generic, tracked,
+  symlinked) + `$PI_KUSTO_COMMANDS_CONFIG` / default
+  `~/.config/pi/kusto-commands.json` (private, untracked, never symlinked,
+  read-only). Use this pattern for the next "generic code + company-internal
+  specifics" case instead of inventing a new one.
+- Run `script/pi-agent-doctor` to check for drift on demand: real files that
+  shadow a tracked repo path (should be a symlink but isn't), or real files
+  that exist locally with no repo copy, inside the directories the repo
+  actually tracks.
+
 ## Environment priorities
 
 - macOS and bp-dev are first-class environments.

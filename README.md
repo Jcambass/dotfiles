@@ -56,6 +56,15 @@ System-specific topics live under their system directory, like
 `macos/homebrew` or `bpdev/vscode-extensions`. Shared topics live under
 `common/`.
 
+`.pi/agent` and `.agents` are the one exception to the component conventions
+above: instead of `*.symlink` files, `common/agents/install.sh` symlinks them
+file-by-file from the repo into `~/.pi/agent` and `~/.agents`. See
+`AGENTS.md`'s "Pi agent linking model" section for the rules (what's
+local-only, why whole-directory symlinking isn't used, and the one safe
+pattern for pairing generic tracked code with a private/local companion
+file). Run `script/pi-agent-doctor` any time to check for drift between the
+repo and your live `~/.pi/agent`/`~/.agents`.
+
 ## install
 
 Run this:
