@@ -16,9 +16,7 @@ Keep examples generic. Use placeholders like `owner/repo`, `example.com`,
 or machine-specific values.
 
 Before committing, scan changes for sensitive or company-specific content. If
-something is useful but private, put it in `private/` (gitignored — see
-`private/README.md`) instead of committing it, or keep it outside the
-repository entirely if it's machine-local state.
+something is useful but private, keep it outside the repository.
 
 Existing public dotfiles names such as `bpdev` are part of this repository's
 supported environments. Do not add new private names, hostnames, or runbooks
