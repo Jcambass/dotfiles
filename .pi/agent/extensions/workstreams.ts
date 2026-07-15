@@ -8,7 +8,9 @@
  * /ws                   pick/open a Project, then pick/create a Workstream
  * /ws new [task]        create a Workstream in the current Project, or choose one
  * /ws end               remove the current linked Workstream and end Pi conversation
- * /ws fork [name]        fork current WIP into a new Workstream
+ * /ws fork [name]           fork current WIP + conversation into a new Workstream
+ * /ws fork --no-wip         fork without copying uncommitted changes
+ * /ws fork --fresh-session  fork WIP but start a fresh Pi conversation
  */
 
 import {
@@ -975,7 +977,8 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 
 	/**
 	 * Fork the current workstream: create a new worktree from HEAD, copy WIP
-	 * (tracked diff + untracked files) into it, register it, and launch in cmux.
+	 * (tracked diff + untracked files) into it, fork the current Pi conversation
+	 * via `pi --fork` unless --fresh-session was passed, register it, and launch in cmux.
 	 */
 	async function doForkWorkstream(
 		ctx: ExtensionCommandContext,
@@ -985,6 +988,7 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		sourceRecord: WorkstreamRecord | undefined,
 		forkName: string,
 		noWip: boolean,
+		freshSession: boolean,
 	): Promise<void> {
 		// Capture source HEAD commit and branch name
 		const headResult = await pi.exec("git", ["rev-parse", "HEAD"], { cwd: currentRoot });
@@ -1132,6 +1136,16 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		};
 		upsertWorkstream(record);
 
+		// Capture the current Pi conversation to fork into the new workspace,
+		// unless --fresh-session was passed.
+		let forkSessionFile: string | undefined;
+		if (!freshSession) {
+			const sessionFile = ctx.sessionManager.getSessionFile();
+			if (sessionFile && fs.existsSync(sessionFile)) {
+				forkSessionFile = sessionFile;
+			}
+		}
+
 		// Launch fork in cmux
 		let launchLine = "cmux not available — open manually";
 		if (isCmux()) {
@@ -1141,6 +1155,7 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 				task: forkName,
 				slug,
 				primary: false,
+				forkSessionFile,
 			});
 			launchLine = result.launched
 				? `Launched: ${result.workspaceTitle ?? slug}`
@@ -1158,6 +1173,11 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 						: "- WIP: no tracked changes (clean source)",
 					`- Untracked files copied: ${untrackedCopied}`,
 			  ];
+		const sessionLine = freshSession
+			? "- Conversation: skipped (--fresh-session)"
+			: forkSessionFile
+				? "- Conversation: forked"
+				: "- Conversation: no active session to fork";
 
 		const message = [
 			"🍴 Workstream forked",
@@ -1165,6 +1185,7 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 			`- Source: \`${sourceBranch}\` → ${currentRoot}`,
 			`- Fork: \`${branchName}\` → ${worktreePath}`,
 			...wipLines,
+			sessionLine,
 			`- ${launchLine}`,
 		].join("\n");
 
@@ -1259,6 +1280,7 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 			}
 
 			const noWip = rest.includes("--no-wip");
+			const freshSession = rest.includes("--fresh-session");
 
 			// Warn about explicitly deferred flags
 			const unsupportedForkFlags = rest.filter(
@@ -1290,7 +1312,7 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 			}
 
 			await doForkWorkstream(
-				ctx, project, mainRoot, currentRoot, sourceRecord, forkName, noWip,
+				ctx, project, mainRoot, currentRoot, sourceRecord, forkName, noWip, freshSession,
 			);
 			return;
 		}

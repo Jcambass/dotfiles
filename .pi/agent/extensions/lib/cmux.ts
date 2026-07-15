@@ -113,6 +113,8 @@ export interface LaunchPiWorkspaceOptions {
 	task: string;
 	slug: string;
 	primary?: boolean;
+	/** Session file to fork into the new workspace's conversation, via `pi --fork`. */
+	forkSessionFile?: string;
 }
 
 export interface LaunchPiWorkspaceResult {
@@ -236,8 +238,9 @@ export async function findWorkspaceForPath(
 // ---------------------------------------------------------------------------
 
 /** Build the shell command that launches a Pi conversation for the given task. */
-export function formatPiCommand(task: string): string {
-	return `PI_SESSION_NAME=${shellQuote(task)} pi`;
+export function formatPiCommand(task: string, forkSessionFile?: string): string {
+	const forkFlag = forkSessionFile ? ` --fork ${shellQuote(forkSessionFile)}` : "";
+	return `PI_SESSION_NAME=${shellQuote(task)} pi${forkFlag}`;
 }
 
 /**
@@ -271,8 +274,8 @@ export async function launchPiWorkspace(
 ): Promise<LaunchPiWorkspaceResult> {
 	if (!isCmux()) return { launched: false };
 
-	const { worktreePath, projectName, task, slug, primary } = options;
-	const piCommand = formatPiCommand(task);
+	const { worktreePath, projectName, task, slug, primary, forkSessionFile } = options;
+	const piCommand = formatPiCommand(task, forkSessionFile);
 	const existingGroup = await findWorkspaceGroupByName(pi, projectName);
 	const groupRef = existingGroup ? cmuxWorkspaceGroupRef(existingGroup) : undefined;
 
