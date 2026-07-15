@@ -522,33 +522,17 @@ _agents_safe_link() {
   ln -s "$src" "$dest" && _agents_log "linked $dest -> $src"
 }
 
-_agents_remove_managed_link() {
-  local src="$1" dest="$2"
-
-  if [ ! -L "$dest" ]; then
-    return 0
-  fi
-
-  if _agents_same_path "$dest" "$src"; then
-    rm "$dest" && _agents_log "disabled $dest on bp-dev"
-  fi
-}
-
-_agents_should_skip_pi_item() {
-  local rel="$1"
-
-  case "$rel" in
-    auth.json|trust.json|sessions|sessions/*|bin|bin/*|config|config/*|gh|gh/*)
-      return 0
-      ;;
-  esac
-
-  return 1
-}
-
+# Symlinks every file under src_dir into dest_dir, recursing into real
+# directories. Deliberately has no path exclusion logic: the paths that
+# must never be symlinked (auth.json, trust.json, sessions/, bin/, config/,
+# gh/) simply never exist in the repo's tracked .pi/agent tree, so this
+# loop never encounters them in normal operation. Keeping those paths out
+# of the repo's git status is .gitignore's job — plain git hygiene, already
+# effective on its own, needing no separate enforcement here. See
+# AGENTS.md's "Pi agent linking model" section.
 _agents_link_tree() {
-  local src_dir="$1" dest_dir="$2" root="$3"
-  local item name rel
+  local src_dir="$1" dest_dir="$2"
+  local item name
 
   if [ -L "$dest_dir" ]; then
     rm "$dest_dir" || return 1
@@ -557,16 +541,9 @@ _agents_link_tree() {
   for item in "$src_dir"/*; do
     [ -e "$item" ] || continue
     name="$(basename "$item")"
-    if [ -n "${root:-}" ]; then
-      rel="${item#$root/}"
-      if _agents_should_skip_pi_item "$rel"; then
-        _agents_remove_managed_link "$item" "$dest_dir/$name"
-        continue
-      fi
-    fi
 
     if [ -d "$item" ]; then
-      _agents_link_tree "$item" "$dest_dir/$name" "${root:-}"
+      _agents_link_tree "$item" "$dest_dir/$name"
     else
       _agents_safe_link "$item" "$dest_dir/$name"
     fi
@@ -607,7 +584,7 @@ _agents_link_pi_agent() {
     esac
   fi
 
-  _agents_link_tree "$src" "$dest" "$src"
+  _agents_link_tree "$src" "$dest"
 
   agents_md="$root/.agents/AGENTS.md"
   if [ -f "$agents_md" ]; then
@@ -615,29 +592,28 @@ _agents_link_pi_agent() {
   fi
 }
 
-_agents_remove_stale_extension_link() {
-  local root="$1" filename="$2"
-  local expected_src dest
+# Remove any symlink under $dest_dir whose target used to point into the
+# dotfiles repo ($repo_root) but no longer exists there. Safe by
+# construction: only ever touches symlinks (never real files), and only
+# ones this repo's own install.sh created (target path is under
+# $repo_root). Covers every subdirectory generically — no per-filename
+# list to maintain (see AGENTS.md's "Pi agent linking model" section).
+_agents_prune_dangling_links() {
+  local dest_dir="$1" repo_root="$2"
+  local link target
 
-  expected_src="$root/.pi/agent/extensions/$filename"
-  dest="$HOME/.pi/agent/extensions/$filename"
+  [ -d "$dest_dir" ] || return 0
 
-  # Source still present in repo — nothing to prune
-  if [ -e "$expected_src" ]; then
-    return 0
-  fi
-
-  # Not a symlink — leave it alone (user-owned or generated file)
-  if [ ! -L "$dest" ]; then
-    return 0
-  fi
-
-  # Only remove if the symlink resolves back to the expected repo location
-  if ! _agents_same_path "$dest" "$expected_src"; then
-    return 0
-  fi
-
-  rm "$dest" && _agents_log "removed stale extension link $dest"
+  while IFS= read -r -d '' link; do
+    target="$(readlink "$link" 2>/dev/null || true)"
+    case "$target" in
+      "$repo_root"/*) ;;
+      *) continue ;;
+    esac
+    if [ ! -e "$target" ]; then
+      rm "$link" && _agents_log "pruned dangling link $link -> $target"
+    fi
+  done < <(find "$dest_dir" -type l -print0 2>/dev/null)
 }
 
 _agents_link_opencode_config() {
@@ -803,14 +779,27 @@ _agents_install_or_update_opencode() {
     || _agents_warn "OpenCode install failed; continuing"
 }
 
+_agents_check_pi_agent_drift() {
+  local root="$1" doctor="$root/script/pi-agent-doctor" summary
+
+  [ -x "$doctor" ] || return 0
+
+  summary="$("$doctor" --summary 2>/dev/null)" || return 0
+
+  if printf '%s\n' "$summary" | grep -Ev ': 0 drift, 0 untracked' | grep -q .; then
+    _agents_warn "drift found under \$HOME/.pi/agent or \$HOME/.agents -- run script/pi-agent-doctor for details"
+  fi
+}
+
 _agents_main() {
   local root failures=0
   root="$(_agents_root)"
 
   _agents_link_global_agents "$root" || failures=$((failures + 1))
   _agents_link_pi_agent "$root" || failures=$((failures + 1))
-  _agents_remove_stale_extension_link "$root" "projects.ts" || failures=$((failures + 1))
-  _agents_remove_stale_extension_link "$root" "worktree.ts" || failures=$((failures + 1))
+  _agents_prune_dangling_links "$HOME/.agents" "$root" || failures=$((failures + 1))
+  _agents_prune_dangling_links "$HOME/.pi/agent" "$root" || failures=$((failures + 1))
+  _agents_check_pi_agent_drift "$root"
   _agents_link_opencode_config "$root" || failures=$((failures + 1))
   _agents_ensure_agent_tools || failures=$((failures + 1))
   _agents_ensure_gh_slack || failures=$((failures + 1))

@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+#
+# pi-agent-doctor: read-only drift audit for the .pi/agent and .agents trees
+# managed by common/agents/install.sh. See AGENTS.md's "Pi agent linking
+# model" section for the rules this checks against.
+#
+# It never modifies anything. Two kinds of findings, neither auto-fixable
+# (dangling symlinks are handled automatically by install.sh's own pruning,
+# not by this script):
+#
+#   DRIFT      a real (non-symlink) file/dir exists where a symlink from the
+#              repo should be. Usually means someone edited the live copy
+#              directly instead of the repo copy, or the file already
+#              existed when bootstrap first ran (install.sh never overwrites
+#              a real file). Check the diff, reconcile by hand.
+#
+#   UNTRACKED  a real file/dir exists locally with no matching path in the
+#              repo. Either add it to the repo, or leave it if it's a
+#              deliberate local-only thing.
+#
+# Scope, by design: this only ever looks inside a top-level name under
+# ~/.pi/agent (or ~/.agents) if that same name also exists in the repo
+# (e.g. extensions/, agents/, prompts/, settings.json). Anything else --
+# auth.json, trust.json, sessions/, bin/, config/, gh/, npm/, ayu/,
+# mcp-oauth/, subagent-runs/, or whatever Pi invents next -- is Pi/tool-
+# owned local state with no repo-side counterpart, so it's out of scope
+# automatically, with nothing to maintain here as Pi evolves.
+#
+# Usage:
+#   script/pi-agent-doctor            full report
+#   script/pi-agent-doctor --summary  one line per tree (for scripting)
+
+set -u
+
+cd "$(dirname "$0")/.."
+root=$(pwd -P)
+
+summary_only=0
+case "${1:-}" in
+  --summary) summary_only=1 ;;
+esac
+
+_doctor_audit_tree() {
+  local repo_dir="$1" home_dir="$2" label="$3"
+  local top name repo_top item rel repo_path drift=0 untracked=0
+
+  if [ -L "$home_dir" ]; then
+    # Whole directory symlinked as one unit (e.g. ~/.agents on a fresh
+    # machine, see _agents_link_global_agents) -- nothing to audit
+    # per-file; install.sh's own pruning/linking already covers this case.
+    echo "$label: 0 drift, 0 untracked ($home_dir is a single symlinked directory)"
+    return 0
+  fi
+
+  if [ ! -d "$home_dir" ]; then
+    echo "$label: 0 drift, 0 untracked (no $home_dir)"
+    return 0
+  fi
+
+  for top in "$home_dir"/*; do
+    [ -e "$top" ] || continue
+    name="$(basename "$top")"
+    repo_top="$repo_dir/$name"
+
+    # Only descend into top-level names the repo also has an entry for.
+    [ -e "$repo_top" ] || continue
+
+    while IFS= read -r -d '' item; do
+      # Symlinks are install.sh's territory (linked or pruned by it); this
+      # audit only cares about real files/dirs that shouldn't be real.
+      [ -L "$item" ] && continue
+
+      rel="${item#$home_dir/}"
+      repo_path="$repo_dir/$rel"
+
+      if [ -d "$item" ]; then
+        # A real directory that also exists as a directory in the repo is
+        # completely normal (only leaf files are ever symlinked; every
+        # directory along the way is a real, mkdir'd container on both
+        # sides). Only report directories that don't line up with the repo.
+        if [ -d "$repo_path" ]; then
+          continue
+        elif [ -e "$repo_path" ]; then
+          if [ "$summary_only" -eq 0 ]; then
+            echo "DRIFT ($label): $item is a directory, but the repo path is a file ($repo_path)"
+          fi
+          drift=$((drift + 1))
+        else
+          if [ "$summary_only" -eq 0 ]; then
+            echo "UNTRACKED ($label): $item (directory, no repo copy)"
+          fi
+          untracked=$((untracked + 1))
+        fi
+        continue
+      fi
+
+      if [ -e "$repo_path" ]; then
+        if [ "$summary_only" -eq 0 ]; then
+          echo "DRIFT ($label): $item"
+          echo "  repo copy: $repo_path"
+          if diff -q "$repo_path" "$item" >/dev/null 2>&1; then
+            echo "  identical to repo copy -- safe to delete and re-run script/bootstrap"
+          else
+            echo "  DIFFERS from repo copy -- reconcile by hand before deleting"
+          fi
+        fi
+        drift=$((drift + 1))
+      else
+        if [ "$summary_only" -eq 0 ]; then
+          echo "UNTRACKED ($label): $item (no repo copy)"
+        fi
+        untracked=$((untracked + 1))
+      fi
+    done < <(find "$top" -print0 2>/dev/null)
+  done
+
+  echo "$label: $drift drift, $untracked untracked"
+}
+
+_doctor_audit_tree "$root/.pi/agent" "$HOME/.pi/agent" "pi/agent"
+_doctor_audit_tree "$root/.agents" "$HOME/.agents" "agents"
