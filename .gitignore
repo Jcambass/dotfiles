@@ -7,3 +7,8 @@ git/gitconfig.local.symlink
 .pi/agent/config/
 .pi/agent/gh/
 .pi/agent/extensions/status-dock/pi-status-dock
+
+# Private, internal-only content — see private/README.md.
+# Everything under private/ is ignored except the README that documents it.
+private/*
+!private/README.md
