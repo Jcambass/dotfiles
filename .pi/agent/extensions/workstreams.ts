@@ -131,9 +131,13 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		const statusResult = await pi.exec("git", ["status", "--porcelain"], { cwd: mainRoot });
 		const dirty = statusResult.code === 0 && statusResult.stdout.trim().length > 0;
 		if (dirty) {
+			const inPrimary = samePath(ctx.cwd, mainRoot);
+			const forkHint = inPrimary
+				? "Use `/ws fork` to copy current WIP."
+				: "Those changes are in the primary checkout, not here. Run `/ws`, choose the primary checkout, then run `/ws fork` there to copy that WIP.";
 			const message = [
 				"New workstream will start from HEAD only.",
-				"Use `/ws fork` to copy current WIP.",
+				forkHint,
 				"Continue?",
 			].join("\n\n");
 			if (ctx.hasUI) {
@@ -141,7 +145,7 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 				if (!ok) return;
 			} else {
 				ctx.ui.notify(
-					"Uncommitted changes present. New workstream starts from HEAD only.",
+					`Uncommitted changes present in the primary checkout (${mainRoot}). New workstream starts from HEAD only.`,
 					"warning",
 				);
 			}
