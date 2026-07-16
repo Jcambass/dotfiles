@@ -11,6 +11,7 @@
  * /ws fork [name]           fork current WIP + conversation into a new Workstream
  * /ws fork --no-wip         fork without copying uncommitted changes
  * /ws fork --fresh-session  fork WIP but start a fresh Pi conversation
+ * /ws code [name]           open a Workstream as a folder/workspace in VS Code
  */
 
 import {
@@ -260,6 +261,28 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 			slug: "primary",
 			primary: true,
 		});
+	}
+
+	/** Open a worktree path as a folder/workspace in VS Code via the `code` CLI. */
+	async function openInVSCode(
+		ctx: ExtensionCommandContext,
+		worktreePath: string,
+		label: string,
+	): Promise<void> {
+		const result = await pi.exec("code", [worktreePath], { cwd: worktreePath });
+		if (result.code !== 0) {
+			const reason = result.stderr.trim() || result.stdout.trim();
+			ctx.ui.notify(
+				[
+					`Failed to open "${label}" in VS Code${reason ? `: ${reason}` : ""}.`,
+					"Make sure the `code` CLI is installed (VS Code: Cmd+Shift+P → " +
+						"\"Shell Command: Install 'code' command in PATH\").",
+				].join(" "),
+				"error",
+			);
+			return;
+		}
+		ctx.ui.notify(`Opened in VS Code: ${label}`, "info");
 	}
 
 	// ── Project list / picker ─────────────────────────────────────────────────
@@ -1213,7 +1236,7 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		const nameTokens = rest.filter((t) => !t.startsWith("-"));
 		const targetName = nameTokens.join(" ");
 
-		const knownSubs = new Set(["new", "end", "fork", ""]);
+		const knownSubs = new Set(["new", "end", "fork", "code", ""]);
 		if (!knownSubs.has(sub)) {
 			ctx.ui.notify(`Unsupported subcommand: ${sub}. Use /ws, /ws new, or /ws end.`, "warning");
 			return;
@@ -1321,6 +1344,63 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 			return;
 		}
 
+		// /ws code [name]
+		if (sub === "code") {
+			if (!currentRoot || !mainRoot || !project) {
+				ctx.ui.notify("/ws code requires a git repository", "error");
+				return;
+			}
+
+			const { workstreams } = readRegistry();
+			const records = workstreams.filter((r) => r.projectId === project!.projectId);
+			const views = await buildWorkstreamViews(mainRoot, project, worktreeList, records, currentRoot);
+			// Only worktrees that actually exist on disk can be opened in an editor.
+			const openable = views.filter((v) => v.worktree);
+
+			let target: WorkstreamView | undefined;
+
+			if (targetName) {
+				const query = targetName.toLowerCase();
+				const matches = openable.filter(
+					(v) =>
+						workstreamDisplayName(v).toLowerCase().includes(query) ||
+						v.slug.toLowerCase().includes(query) ||
+						v.branch.toLowerCase().includes(query),
+				);
+				if (matches.length === 0) {
+					ctx.ui.notify(`No matching Workstream found: ${targetName}`, "error");
+					return;
+				} else if (matches.length === 1 || !ctx.hasUI) {
+					target = matches[0];
+				} else {
+					const label = await ctx.ui.select(
+						"Multiple matches — pick one",
+						matches.map((v) => workstreamPickerLabel(v)),
+					);
+					if (!label) return;
+					target = matches.find((v) => workstreamPickerLabel(v) === label);
+				}
+			} else {
+				target = openable.find((v) => v.current);
+				if (!target && ctx.hasUI) {
+					const label = await ctx.ui.select(
+						"Open which Workstream in VS Code?",
+						openable.map((v) => workstreamPickerLabel(v)),
+					);
+					if (!label) return;
+					target = openable.find((v) => workstreamPickerLabel(v) === label);
+				}
+			}
+
+			if (!target) {
+				ctx.ui.notify("/ws code requires a name or being inside a Workstream", "error");
+				return;
+			}
+
+			await openInVSCode(ctx, target.worktreePath, workstreamDisplayName(target));
+			return;
+		}
+
 		// /ws with no args — current Project if possible, otherwise Project picker.
 		if (mainRoot && project) {
 			await openProjectWorkstreams(ctx, project);
@@ -1331,10 +1411,10 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 
 	pi.registerCommand("ws", {
 		description:
-			"Open Projects and manage Workstreams · /ws · /ws new [task] · /ws end",
+			"Open Projects and manage Workstreams · /ws · /ws new [task] · /ws end · /ws code [name]",
 		getArgumentCompletions: (prefix) => {
 			const clean = prefix.trim();
-			return ["new", "end", "fork"]
+			return ["new", "end", "fork", "code"]
 				.filter((c) => c.startsWith(clean.toLowerCase()))
 				.map((v) => ({ value: v, label: v }));
 		},
