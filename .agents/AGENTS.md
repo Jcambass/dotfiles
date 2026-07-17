@@ -54,6 +54,9 @@ This applies to:
 - release notes
 - git commit messages
 - emails, Slack messages, docs, reviews, and status updates
+- any "reword", "rephrase", "rewrite", or "polish this" request, even with no stated destination
+
+When I ask to reword/rephrase/rewrite/polish text without saying where it's going, still apply the writing-voice skill by default — do not ask for the destination first unless the wording genuinely depends on it (e.g. a formal external audience vs. an internal Slack message).
 
 Draft the text first, apply the writing-voice final checklist, then publish it.
 Do not compose polished prose directly inside a `gh` or `git commit -m` command.
