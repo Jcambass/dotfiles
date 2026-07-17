@@ -5,7 +5,7 @@ description: Write drafts in the user's voice for comments, docs, messages, revi
 
 # Writing Voice
 
-Use this for any personal writing where the reader should think the user wrote it themselves: performance reviews, status updates, emails, proposals, design documents, blog posts, Slack drafts, GitHub comments, reviews, release notes, and commit messages. Apply it automatically whenever drafting this kind of user-facing prose on the user's behalf — do not wait to be told to "use the writing-voice skill" first.
+Use this for any personal writing where the reader should think the user wrote it themselves: performance reviews, status updates, emails, proposals, design documents, blog posts, Slack messages, GitHub comments, reviews, release notes, and commit messages. Apply it automatically whenever drafting this kind of user-facing prose on the user's behalf — do not wait to be told to "use the writing-voice skill" first.
 
 This skill has two parts:
 

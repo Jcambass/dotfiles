@@ -53,7 +53,7 @@ This applies to:
 - GitHub PR comments
 - release notes
 - git commit messages
-- emails, Slack drafts, docs, reviews, and status updates
+- emails, Slack messages, docs, reviews, and status updates
 
 Draft the text first, apply the writing-voice final checklist, then publish it.
 Do not compose polished prose directly inside a `gh` or `git commit -m` command.
