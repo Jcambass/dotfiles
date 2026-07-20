@@ -38,6 +38,16 @@ For small tasks, just do the work.
 
 When a user includes a link, read the linked context before answering or drafting from it. Use the right source-specific tool for the link, for example `gh` for GitHub links, instead of guessing from the URL or surrounding prompt.
 
+## Waiting on slow external processes (CI, deploys, builds)
+
+There is no background execution after I finish a reply — nothing happens until you prompt me again. Never say "I'll check back shortly" (or similar) and then just stop; that implies a follow-up that will not happen on its own.
+
+Instead:
+
+- Poll for it in the same turn: run a bounded loop (bash `sleep` between checks, e.g. `gh pr checks` / `gh run watch`) with a sane retry count or timeout, and report the final result once it resolves or the timeout is hit.
+- `gh run watch` and `gh pr checks --watch` already block and poll natively — prefer those over hand-rolled loops when available.
+- If it would realistically take too long for one turn (long deploys, multi-hour jobs), say so plainly and ask me to check back or re-prompt — do not imply I'll follow up on my own.
+
 ## Writing on my behalf
 
 Before drafting or publishing user-visible prose on my behalf, load and apply:
