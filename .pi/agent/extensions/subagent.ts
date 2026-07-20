@@ -31,6 +31,14 @@ import {
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { findPlanFile } from "./plan.js";
+import { isCmux } from "./lib/cmux.js";
+import {
+	closePaneRun,
+	openPaneRun,
+	writePaneLine,
+	type PaneRun,
+	type PaneSlot,
+} from "./lib/subagent-panes.js";
 
 // ─── Agent discovery ────────────────────────────────────────────────────────
 
@@ -257,21 +265,58 @@ function getToolCallSummary(messages: Message[]): string[] {
 	return calls;
 }
 
+/** Human-readable lines for one NDJSON message, for the cmux pane live feed. */
+function formatMessageForPane(msg: Message): string[] {
+	const lines: string[] = [];
+	if (msg.role === "assistant") {
+		for (const part of msg.content) {
+			if (part.type === "text" && part.text.trim()) {
+				lines.push(part.text.trim());
+			} else if (part.type === "toolCall") {
+				const args = part.arguments as Record<string, unknown>;
+				switch (part.name) {
+					case "bash":
+						lines.push(`$ ${(args.command as string) || "..."}`);
+						break;
+					case "read":
+						lines.push(`read ${shortenPath((args.path as string) || "...")}`);
+						break;
+					case "write":
+						lines.push(`write ${shortenPath((args.path as string) || "...")}`);
+						break;
+					case "edit":
+						lines.push(`edit ${shortenPath((args.path as string) || "...")}`);
+						break;
+					default:
+						lines.push(`→ ${part.name}`);
+				}
+			}
+		}
+	} else if (msg.role === "toolResult") {
+		lines.push(`${msg.isError ? "✗" : "✓"} ${msg.toolName}`);
+	}
+	return lines;
+}
+
+function truncateTitle(s: string, max = 60): string {
+	return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
 // ─── Concurrency ────────────────────────────────────────────────────────────
 
 async function mapConcurrent<T, R>(
 	items: T[],
 	limit: number,
-	fn: (item: T, index: number) => Promise<R>,
+	fn: (item: T, index: number, lane: number) => Promise<R>,
 ): Promise<R[]> {
 	const results: R[] = new Array(items.length);
 	let next = 0;
-	const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+	const workers = Array.from({ length: Math.min(limit, items.length) }, (_unused, lane) => (async () => {
 		while (next < items.length) {
 			const i = next++;
-			results[i] = await fn(items[i], i);
+			results[i] = await fn(items[i], i, lane);
 		}
-	});
+	})());
 	await Promise.all(workers);
 	return results;
 }
@@ -308,10 +353,13 @@ async function runAgent(
 		signal?: AbortSignal;
 		onUpdate?: OnUpdate;
 		makeDetails: (results: SingleResult[]) => SubagentDetails;
+		paneSlot?: PaneSlot;
+		paneLabel?: string;
 	},
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 	if (!agent) {
+		writePaneLine(opts.paneSlot, `✗ unknown agent "${agentName}"`);
 		return {
 			agent: agentName,
 			task,
@@ -342,6 +390,10 @@ async function runAgent(
 	};
 
 	const startTime = Date.now();
+
+	if (opts.paneSlot) {
+		writePaneLine(opts.paneSlot, `\n=== ${opts.paneLabel ?? agentName} ===\ntask: ${task}\n`);
+	}
 
 	const emitUpdate = () => {
 		opts.onUpdate?.({
@@ -410,11 +462,14 @@ async function runAgent(
 						if (msg.stopReason) result.stopReason = msg.stopReason;
 						if (msg.errorMessage) result.errorMessage = msg.errorMessage;
 					}
+					for (const paneLine of formatMessageForPane(msg)) writePaneLine(opts.paneSlot, paneLine);
 					emitUpdate();
 				}
 
 				if (ev.type === "tool_result_end" && ev.message) {
-					result.messages.push(ev.message as Message);
+					const msg = ev.message as Message;
+					result.messages.push(msg);
+					for (const paneLine of formatMessageForPane(msg)) writePaneLine(opts.paneSlot, paneLine);
 					emitUpdate();
 				}
 			};
@@ -452,6 +507,10 @@ async function runAgent(
 
 		result.exitCode = exitCode;
 		result.durationMs = Date.now() - startTime;
+		if (opts.paneSlot) {
+			const status = aborted ? "aborted" : exitCode === 0 ? "done" : `failed (exit ${exitCode})`;
+			writePaneLine(opts.paneSlot, `--- ${status} · ${formatDuration(result.durationMs)} ---`);
+		}
 		if (aborted) throw new Error("Subagent aborted");
 
 		// Apply per-agent output line limits (maxOutputLines frontmatter)
@@ -655,6 +714,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_id, params, signal, onUpdate, ctx) {
 			const { agents } = discoverAgents(ctx.cwd, "both");
 			const makeDetails = (mode: SubagentDetails["mode"]) => (results: SingleResult[]): SubagentDetails => ({ mode, results });
+			const wantsPanes = ctx.mode === "tui" && isCmux();
 
 			const hasChain = (params.chain?.length ?? 0) > 0;
 			const hasTasks = (params.tasks?.length ?? 0) > 0;
@@ -671,52 +731,64 @@ export default function (pi: ExtensionAPI) {
 
 			// ── Chain ──
 			if (params.chain && params.chain.length > 0) {
-				const results: SingleResult[] = [];
-				let previousOutput = "";
-
-				for (let i = 0; i < params.chain.length; i++) {
-					const step = params.chain[i];
-
-					// Compress previous output to avoid context bloat in downstream steps
-					const MAX_PREVIOUS_CHARS = 4000;
-					let previousForTask = previousOutput;
-					if (previousOutput.length > MAX_PREVIOUS_CHARS) {
-						previousForTask = previousOutput.slice(0, MAX_PREVIOUS_CHARS)
-							+ `\n\n[Output truncated: ${previousOutput.length} chars total, showing first ${MAX_PREVIOUS_CHARS}]`;
-					}
-					const task = step.task.replace(/\{previous\}/g, previousForTask);
-
-					const chainOnUpdate: OnUpdate | undefined = onUpdate
-						? (partial) => {
-								const cur = partial.details?.results[0];
-								if (cur) onUpdate({ content: partial.content, details: makeDetails("chain")([...results, cur]) });
-							}
-						: undefined;
-
-					const r = await runAgent(ctx.cwd, agents, step.agent, task, {
-						cwd: step.cwd,
-						step: i + 1,
-						signal,
-						onUpdate: chainOnUpdate,
-						makeDetails: makeDetails("chain"),
-					});
-					results.push(r);
-
-					if (r.exitCode !== 0 || r.stopReason === "error" || r.stopReason === "aborted") {
-						const err = r.errorMessage || r.stderr || getFinalOutput(r.messages) || "(no output)";
-						return {
-							content: [{ type: "text", text: `Chain stopped at step ${i + 1} (${step.agent}): ${err}` }],
-							details: makeDetails("chain")(results),
-							isError: true,
-						};
-					}
-					previousOutput = getFinalOutput(r.messages);
+				let paneRun: PaneRun | null = null;
+				if (wantsPanes) {
+					const flow = params.chain.map((s) => s.agent).join(" → ");
+					paneRun = await openPaneRun(pi, { title: `chain: ${truncateTitle(flow)}`, slotCount: 1 });
 				}
 
-				return {
-					content: [{ type: "text", text: truncateOutput(getFinalOutput(results[results.length - 1].messages) || "(no output)") }],
-					details: makeDetails("chain")(results),
-				};
+				try {
+					const results: SingleResult[] = [];
+					let previousOutput = "";
+
+					for (let i = 0; i < params.chain.length; i++) {
+						const step = params.chain[i];
+
+						// Compress previous output to avoid context bloat in downstream steps
+						const MAX_PREVIOUS_CHARS = 4000;
+						let previousForTask = previousOutput;
+						if (previousOutput.length > MAX_PREVIOUS_CHARS) {
+							previousForTask = previousOutput.slice(0, MAX_PREVIOUS_CHARS)
+								+ `\n\n[Output truncated: ${previousOutput.length} chars total, showing first ${MAX_PREVIOUS_CHARS}]`;
+						}
+						const task = step.task.replace(/\{previous\}/g, previousForTask);
+
+						const chainOnUpdate: OnUpdate | undefined = onUpdate
+							? (partial) => {
+									const cur = partial.details?.results[0];
+									if (cur) onUpdate({ content: partial.content, details: makeDetails("chain")([...results, cur]) });
+								}
+							: undefined;
+
+						const r = await runAgent(ctx.cwd, agents, step.agent, task, {
+							cwd: step.cwd,
+							step: i + 1,
+							signal,
+							onUpdate: chainOnUpdate,
+							makeDetails: makeDetails("chain"),
+							paneSlot: paneRun?.slots[0],
+							paneLabel: `Step ${i + 1}: ${step.agent}`,
+						});
+						results.push(r);
+
+						if (r.exitCode !== 0 || r.stopReason === "error" || r.stopReason === "aborted") {
+							const err = r.errorMessage || r.stderr || getFinalOutput(r.messages) || "(no output)";
+							return {
+								content: [{ type: "text", text: `Chain stopped at step ${i + 1} (${step.agent}): ${err}` }],
+								details: makeDetails("chain")(results),
+								isError: true,
+							};
+						}
+						previousOutput = getFinalOutput(r.messages);
+					}
+
+					return {
+						content: [{ type: "text", text: truncateOutput(getFinalOutput(results[results.length - 1].messages) || "(no output)") }],
+						details: makeDetails("chain")(results),
+					};
+				} finally {
+					closePaneRun(paneRun);
+				}
 			}
 
 			// ── Parallel ──
@@ -729,80 +801,106 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 
-				const live: (SingleResult | undefined)[] = new Array(params.tasks.length).fill(undefined);
-
-				const emitParallel = () => {
-					if (!onUpdate) return;
-					const filled = live.filter((r): r is SingleResult => r !== undefined);
-					const done = filled.filter((r) => r.exitCode !== -1).length;
-					onUpdate({
-						content: [{ type: "text", text: `${done}/${params.tasks!.length} done` }],
-						details: makeDetails("parallel")(filled),
+				let paneRun: PaneRun | null = null;
+				if (wantsPanes) {
+					const names = params.tasks.map((t) => t.agent).join(", ");
+					paneRun = await openPaneRun(pi, {
+						title: `agents: ${truncateTitle(names)}`,
+						slotCount: Math.min(MAX_CONCURRENCY, params.tasks.length),
 					});
-				};
-
-				// Initialize placeholders
-				for (let i = 0; i < params.tasks.length; i++) {
-					live[i] = {
-						agent: params.tasks[i].agent,
-						task: params.tasks[i].task,
-						exitCode: -1,
-						messages: [],
-						stderr: "",
-						usage: emptyUsage(),
-					};
 				}
 
-				const results = await mapConcurrent(params.tasks, MAX_CONCURRENCY, async (t, i) => {
-					const r = await runAgent(ctx.cwd, agents, t.agent, t.task, {
-						cwd: t.cwd,
-						signal,
-						onUpdate: (partial) => {
-							const cur = partial.details?.results[0];
-							if (cur) { live[i] = { ...cur, exitCode: -1 }; emitParallel(); }
-						},
-						makeDetails: makeDetails("parallel"),
+				try {
+					const live: (SingleResult | undefined)[] = new Array(params.tasks.length).fill(undefined);
+
+					const emitParallel = () => {
+						if (!onUpdate) return;
+						const filled = live.filter((r): r is SingleResult => r !== undefined);
+						const done = filled.filter((r) => r.exitCode !== -1).length;
+						onUpdate({
+							content: [{ type: "text", text: `${done}/${params.tasks!.length} done` }],
+							details: makeDetails("parallel")(filled),
+						});
+					};
+
+					// Initialize placeholders
+					for (let i = 0; i < params.tasks.length; i++) {
+						live[i] = {
+							agent: params.tasks[i].agent,
+							task: params.tasks[i].task,
+							exitCode: -1,
+							messages: [],
+							stderr: "",
+							usage: emptyUsage(),
+						};
+					}
+
+					const results = await mapConcurrent(params.tasks, MAX_CONCURRENCY, async (t, i, lane) => {
+						const r = await runAgent(ctx.cwd, agents, t.agent, t.task, {
+							cwd: t.cwd,
+							signal,
+							onUpdate: (partial) => {
+								const cur = partial.details?.results[0];
+								if (cur) { live[i] = { ...cur, exitCode: -1 }; emitParallel(); }
+							},
+							makeDetails: makeDetails("parallel"),
+							paneSlot: paneRun?.slots[lane],
+							paneLabel: t.agent,
+						});
+						live[i] = r;
+						emitParallel();
+						return r;
 					});
-					live[i] = r;
-					emitParallel();
-					return r;
-				});
 
-				const ok = results.filter((r) => r.exitCode === 0).length;
-				const summaries = results.map((r) => {
-					const out = getFinalOutput(r.messages);
-					const preview = out.length > 200 ? out.slice(0, 200) + "…" : out;
-					return `[${r.agent}] ${r.exitCode === 0 ? "✓" : "✗"}: ${preview || "(no output)"}`;
-				});
+					const ok = results.filter((r) => r.exitCode === 0).length;
+					const summaries = results.map((r) => {
+						const out = getFinalOutput(r.messages);
+						const preview = out.length > 200 ? out.slice(0, 200) + "…" : out;
+						return `[${r.agent}] ${r.exitCode === 0 ? "✓" : "✗"}: ${preview || "(no output)"}`;
+					});
 
-				return {
-					content: [{ type: "text", text: truncateOutput(`${ok}/${results.length} succeeded\n\n${summaries.join("\n\n")}`) }],
-					details: makeDetails("parallel")(results),
-				};
+					return {
+						content: [{ type: "text", text: truncateOutput(`${ok}/${results.length} succeeded\n\n${summaries.join("\n\n")}`) }],
+						details: makeDetails("parallel")(results),
+					};
+				} finally {
+					closePaneRun(paneRun);
+				}
 			}
 
 			// ── Single ──
 			if (params.agent && params.task) {
-				const r = await runAgent(ctx.cwd, agents, params.agent, params.task, {
-					cwd: params.cwd,
-					signal,
-					onUpdate,
-					makeDetails: makeDetails("single"),
-				});
-
-				const isErr = r.exitCode !== 0 || r.stopReason === "error" || r.stopReason === "aborted";
-				if (isErr) {
-					return {
-						content: [{ type: "text", text: r.errorMessage || r.stderr || getFinalOutput(r.messages) || "Failed" }],
-						details: makeDetails("single")([r]),
-						isError: true,
-					};
+				let paneRun: PaneRun | null = null;
+				if (wantsPanes) {
+					paneRun = await openPaneRun(pi, { title: `agent: ${params.agent}`, slotCount: 1 });
 				}
 
-				return {
-					content: [{ type: "text", text: truncateOutput(getFinalOutput(r.messages) || "(no output)") }],
-					details: makeDetails("single")([r]),
-				};
+				try {
+					const r = await runAgent(ctx.cwd, agents, params.agent, params.task, {
+						cwd: params.cwd,
+						signal,
+						onUpdate,
+						makeDetails: makeDetails("single"),
+						paneSlot: paneRun?.slots[0],
+						paneLabel: params.agent,
+					});
+
+					const isErr = r.exitCode !== 0 || r.stopReason === "error" || r.stopReason === "aborted";
+					if (isErr) {
+						return {
+							content: [{ type: "text", text: r.errorMessage || r.stderr || getFinalOutput(r.messages) || "Failed" }],
+							details: makeDetails("single")([r]),
+							isError: true,
+						};
+					}
+
+					return {
+						content: [{ type: "text", text: truncateOutput(getFinalOutput(r.messages) || "(no output)") }],
+						details: makeDetails("single")([r]),
+					};
+				} finally {
+					closePaneRun(paneRun);
+				}
 			}
 
 			return {
