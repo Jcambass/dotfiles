@@ -1,9 +1,12 @@
 /**
  * Best-effort cmux pane integration for the subagent tool.
  *
- * Opens a dedicated cmux tab (workspace) with one pane per concurrency slot,
- * so a human can watch subagents live in addition to — not instead of — the
- * structured NDJSON stream the subagent tool already parses for the model.
+ * Splits new panes directly into the CURRENT cmux workspace/session — the
+ * same one the running pi conversation already lives in. Deliberately never
+ * calls `cmux new-workspace`: a cmux workspace is a persistent session (it
+ * carries its own env vars, todo checklist, status, connection state), not
+ * a disposable tab. Subagent panes must stay inside the caller's existing
+ * session; only new panes (splits) are created there.
  *
  * Every step here is best-effort: any failure returns null/no-ops instead of
  * throwing. Panes are a bonus; they must never block or fail agent execution.
@@ -13,7 +16,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { extractWorkspaceRef, isCmux, shellQuote, sleep } from "./cmux.js";
+import { isCmux, shellQuote, sleep } from "./cmux.js";
 
 /** Matches the subagent tool's own MAX_PARALLEL/MAX_CONCURRENCY ceiling. */
 const MAX_SLOTS = 4;
@@ -30,82 +33,58 @@ export interface PaneSlot {
 }
 
 export interface PaneRun {
-	workspaceRef: string;
 	slots: PaneSlot[];
 }
 
 /**
- * Fixed 2x2 grid plan for up to MAX_SLOTS panes, built from a base surface:
- * top-left (given) -> top-right (split right) -> bottom-left (split down
- * from top-left) -> bottom-right (split down from top-right).
+ * Split off `slotCount` new panes stacked in a column next to the anchor
+ * surface (the pane the live pi conversation is running in). The anchor
+ * itself is never reused or written to — only ever the split origin.
  */
-async function buildGrid(
+async function splitColumn(
 	pi: ExtensionAPI,
 	workspaceRef: string,
-	firstSurfaceRef: string,
+	anchorSurfaceRef: string,
 	slotCount: number,
 ): Promise<string[]> {
-	const refs = [firstSurfaceRef];
-	if (slotCount < 2) return refs;
-
-	const split = async (direction: string, fromSurface: string): Promise<string | null> => {
+	const refs: string[] = [];
+	let fromSurface = anchorSurfaceRef;
+	for (let i = 0; i < slotCount; i++) {
+		const direction = i === 0 ? "right" : "down";
 		const result = await pi.exec("cmux", [
 			"new-split", direction, "--surface", fromSurface, "--workspace", workspaceRef,
 		]);
-		if (result.code !== 0) return null;
-		return extractSurfaceRef(result.stdout || result.stderr || "");
-	};
-
-	const topRight = await split("right", firstSurfaceRef);
-	if (topRight) refs.push(topRight);
-	if (slotCount < 3 || !topRight) return refs;
-
-	const bottomLeft = await split("down", firstSurfaceRef);
-	if (bottomLeft) refs.push(bottomLeft);
-	if (slotCount < 4 || !bottomLeft) return refs;
-
-	const bottomRight = await split("down", topRight);
-	if (bottomRight) refs.push(bottomRight);
-
+		if (result.code !== 0) break;
+		const ref = extractSurfaceRef(result.stdout || result.stderr || "");
+		if (!ref) break;
+		refs.push(ref);
+		fromSurface = ref;
+	}
 	return refs;
 }
 
 /**
- * Open a dedicated cmux tab with one pane per slot, each tailing its own log
- * file. Returns null (no-op for callers) when not in cmux or on any failure.
- *
- * Deliberately does NOT use the caller's project/worktree path as the
- * workspace's cwd. workstreams.ts resolves "is this workstream open in
- * cmux" (and /ws's open/switch target) by matching a live cmux workspace's
- * cwd against the worktree path (`findWorkspaceForPath` in lib/cmux.ts). If
- * this scratch tab used that same path, it would collide with the real
- * workstream's workspace and /ws could switch you into this throwaway
- * monitoring tab instead of your actual coding session. Its own log
- * directory is an unrelated path, so it can never match.
+ * Split one pane per slot into the current cmux workspace, each tailing its
+ * own log file. Returns null (no-op for callers) when not in cmux, when the
+ * current workspace/surface can't be identified from the environment, or on
+ * any failure.
  */
 export async function openPaneRun(
 	pi: ExtensionAPI,
-	opts: { title: string; slotCount: number },
+	opts: { slotCount: number },
 ): Promise<PaneRun | null> {
 	if (!isCmux()) return null;
+	const workspaceRef = process.env.CMUX_WORKSPACE_ID;
+	const anchorSurfaceRef = process.env.CMUX_SURFACE_ID;
+	if (!workspaceRef || !anchorSurfaceRef) return null;
+
 	const slotCount = Math.max(1, Math.min(MAX_SLOTS, opts.slotCount));
 
 	try {
+		const surfaceRefs = await splitColumn(pi, workspaceRef, anchorSurfaceRef, slotCount);
+		if (surfaceRefs.length === 0) return null;
+
 		const logDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-panes-"));
-
-		const createResult = await pi.exec("cmux", [
-			"new-workspace", "--name", opts.title, "--cwd", logDir, "--focus", "false",
-		]);
-		if (createResult.code !== 0) return null;
-		const workspaceRef = extractWorkspaceRef(createResult.stdout || createResult.stderr || "");
-		if (!workspaceRef) return null;
-
-		const treeResult = await pi.exec("cmux", ["tree", "--workspace", workspaceRef]);
-		const firstSurfaceRef = extractSurfaceRef(treeResult.stdout || "");
-		if (!firstSurfaceRef) return null;
-
-		const surfaceRefs = await buildGrid(pi, workspaceRef, firstSurfaceRef, slotCount);
-
 		const slots: PaneSlot[] = [];
 		for (let i = 0; i < surfaceRefs.length; i++) {
 			const logPath = path.join(logDir, `slot-${i}.log`);
@@ -119,8 +98,7 @@ export async function openPaneRun(
 			await sleep(120);
 		}
 
-		if (slots.length === 0) return null;
-		return { workspaceRef, slots };
+		return { slots };
 	} catch {
 		return null;
 	}
@@ -135,8 +113,22 @@ export function writePaneLine(slot: PaneSlot | undefined, text: string): void {
 	}
 }
 
-/** Close log streams. Leaves the cmux tab/panes open for the user to review. */
-export function closePaneRun(run: PaneRun | null | undefined): void {
+/** Label a pane's tab with the agent currently occupying that slot. */
+export function renamePaneTab(pi: ExtensionAPI, slot: PaneSlot | undefined, label: string): void {
+	if (!slot) return;
+	pi.exec("cmux", ["rename-tab", "--surface", slot.surfaceRef, label]).catch(() => {
+		// best-effort
+	});
+}
+
+/**
+ * Close log streams. Leaves the panes open in your current workspace so
+ * you can review the output or close them yourself — cmux's CLI refuses to
+ * close the last surface in a pane (`close-surface` -> `invalid_state:
+ * Cannot close the last surface`), and every subagent pane has exactly one
+ * surface, so there is no CLI-level way to auto-remove them anyway.
+ */
+export function closePaneRun(_pi: ExtensionAPI, run: PaneRun | null | undefined): void {
 	if (!run) return;
 	for (const slot of run.slots) {
 		try {

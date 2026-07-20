@@ -35,6 +35,7 @@ import { isCmux } from "./lib/cmux.js";
 import {
 	closePaneRun,
 	openPaneRun,
+	renamePaneTab,
 	writePaneLine,
 	type PaneRun,
 	type PaneSlot,
@@ -298,10 +299,6 @@ function formatMessageForPane(msg: Message): string[] {
 	return lines;
 }
 
-function truncateTitle(s: string, max = 60): string {
-	return s.length > max ? `${s.slice(0, max - 1)}…` : s;
-}
-
 // ─── Concurrency ────────────────────────────────────────────────────────────
 
 async function mapConcurrent<T, R>(
@@ -343,6 +340,7 @@ async function writePromptFile(name: string, prompt: string): Promise<{ dir: str
 type OnUpdate = (partial: AgentToolResult<SubagentDetails>) => void;
 
 async function runAgent(
+	pi: ExtensionAPI,
 	defaultCwd: string,
 	agents: AgentConfig[],
 	agentName: string,
@@ -392,6 +390,7 @@ async function runAgent(
 	const startTime = Date.now();
 
 	if (opts.paneSlot) {
+		renamePaneTab(pi, opts.paneSlot, opts.paneLabel ?? agentName);
 		writePaneLine(opts.paneSlot, `\n=== ${opts.paneLabel ?? agentName} ===\ntask: ${task}\n`);
 	}
 
@@ -733,8 +732,7 @@ export default function (pi: ExtensionAPI) {
 			if (params.chain && params.chain.length > 0) {
 				let paneRun: PaneRun | null = null;
 				if (wantsPanes) {
-					const flow = params.chain.map((s) => s.agent).join(" → ");
-					paneRun = await openPaneRun(pi, { title: `chain: ${truncateTitle(flow)}`, slotCount: 1 });
+					paneRun = await openPaneRun(pi, { slotCount: 1 });
 				}
 
 				try {
@@ -760,7 +758,7 @@ export default function (pi: ExtensionAPI) {
 								}
 							: undefined;
 
-						const r = await runAgent(ctx.cwd, agents, step.agent, task, {
+						const r = await runAgent(pi, ctx.cwd, agents, step.agent, task, {
 							cwd: step.cwd,
 							step: i + 1,
 							signal,
@@ -787,7 +785,7 @@ export default function (pi: ExtensionAPI) {
 						details: makeDetails("chain")(results),
 					};
 				} finally {
-					closePaneRun(paneRun);
+					closePaneRun(pi, paneRun);
 				}
 			}
 
@@ -803,9 +801,7 @@ export default function (pi: ExtensionAPI) {
 
 				let paneRun: PaneRun | null = null;
 				if (wantsPanes) {
-					const names = params.tasks.map((t) => t.agent).join(", ");
 					paneRun = await openPaneRun(pi, {
-						title: `agents: ${truncateTitle(names)}`,
 						slotCount: Math.min(MAX_CONCURRENCY, params.tasks.length),
 					});
 				}
@@ -836,7 +832,7 @@ export default function (pi: ExtensionAPI) {
 					}
 
 					const results = await mapConcurrent(params.tasks, MAX_CONCURRENCY, async (t, i, lane) => {
-						const r = await runAgent(ctx.cwd, agents, t.agent, t.task, {
+						const r = await runAgent(pi, ctx.cwd, agents, t.agent, t.task, {
 							cwd: t.cwd,
 							signal,
 							onUpdate: (partial) => {
@@ -864,7 +860,7 @@ export default function (pi: ExtensionAPI) {
 						details: makeDetails("parallel")(results),
 					};
 				} finally {
-					closePaneRun(paneRun);
+					closePaneRun(pi, paneRun);
 				}
 			}
 
@@ -872,11 +868,11 @@ export default function (pi: ExtensionAPI) {
 			if (params.agent && params.task) {
 				let paneRun: PaneRun | null = null;
 				if (wantsPanes) {
-					paneRun = await openPaneRun(pi, { title: `agent: ${params.agent}`, slotCount: 1 });
+					paneRun = await openPaneRun(pi, { slotCount: 1 });
 				}
 
 				try {
-					const r = await runAgent(ctx.cwd, agents, params.agent, params.task, {
+					const r = await runAgent(pi, ctx.cwd, agents, params.agent, params.task, {
 						cwd: params.cwd,
 						signal,
 						onUpdate,
@@ -899,7 +895,7 @@ export default function (pi: ExtensionAPI) {
 						details: makeDetails("single")([r]),
 					};
 				} finally {
-					closePaneRun(paneRun);
+					closePaneRun(pi, paneRun);
 				}
 			}
 
