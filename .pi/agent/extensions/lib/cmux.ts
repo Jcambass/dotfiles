@@ -156,9 +156,9 @@ export function parseCmuxWorkspaceGroup(output: string): CmuxWorkspaceGroup | un
 
 /**
  * Best-effort: make sure a workspace is a member of its project's cmux group,
- * creating the group (anchored on this workspace) if none exists yet for the
- * project name. Silently no-ops on any failure -- group bookkeeping must
- * never block workspace switching or session start.
+ * creating the group if none exists yet for the project name. Silently
+ * no-ops on any failure -- group bookkeeping must never block workspace
+ * switching or session start.
  *
  * This exists because group-joining previously only ran at workspace
  * *creation* time (in launchPiWorkspace). A workspace opened outside that
@@ -181,10 +181,38 @@ export async function ensureWorkspaceInGroup(
 
 		if (!group) {
 			const from = target.ref ?? target.id;
-			if (from) {
-				await pi.exec("cmux", [
-					"workspace-group", "create", "--name", projectName, "--from", from, "--json",
-				]);
+			if (!from) return;
+
+			const createResult = await pi.exec("cmux", [
+				"workspace-group", "create", "--name", projectName, "--from", from, "--json",
+			]);
+			if (createResult.code !== 0) return;
+
+			const created = parseCmuxWorkspaceGroup(createResult.stdout || createResult.stderr || "");
+			const createdGroupRef = created ? cmuxWorkspaceGroupRef(created) : undefined;
+			if (!createdGroupRef) return;
+
+			// `create --from <workspace>` creates a brand-new blank workspace as the
+			// group's anchor and adds the given workspace as a plain member
+			// alongside it, rather than making the given workspace the anchor
+			// itself. Promote it to anchor, then close the stray blank workspace
+			// cmux created so it doesn't linger as clutter (this is very likely
+			// what produced the ungrouped/mislabeled tabs found earlier).
+			await pi.exec("cmux", ["workspace-group", "set-anchor", "--group", createdGroupRef, "--workspace", from]);
+
+			const refreshedGroups = await listWorkspaceGroups(pi);
+			const refreshed = refreshedGroups.find((g) => cmuxWorkspaceGroupRef(g) === createdGroupRef);
+			const ids = refreshed?.member_workspace_ids ?? [];
+			const refs = refreshed?.member_workspace_refs ?? [];
+			const strayIndex = refs.findIndex((memberRef, i) => {
+				const memberId = ids[i];
+				const matchesTarget =
+					(target.id && memberId === target.id) || (target.ref && memberRef === target.ref);
+				return !matchesTarget;
+			});
+			const strayRef = strayIndex >= 0 ? refs[strayIndex] : undefined;
+			if (strayRef) {
+				await pi.exec("cmux", ["close-workspace", "--workspace", strayRef]);
 			}
 			return;
 		}
@@ -207,7 +235,7 @@ export async function ensureWorkspaceInGroup(
 }
 
 export async function listWorkspaceGroups(pi: ExtensionAPI): Promise<CmuxWorkspaceGroup[]> {
-	const result = await pi.exec("cmux", ["workspace-group", "list", "--json"]);
+	const result = await pi.exec("cmux", ["workspace-group", "list", "--json", "--id-format", "both"]);
 	if (result.code !== 0 || !result.stdout.trim()) return [];
 	try {
 		const parsed = JSON.parse(result.stdout) as { groups?: CmuxWorkspaceGroup[] };
@@ -291,10 +319,20 @@ export async function findWorkspaceForPath(
 // Formatting
 // ---------------------------------------------------------------------------
 
-/** Build the shell command that launches a Pi conversation for the given task. */
+/**
+ * Build the shell command that launches a Pi conversation for the given task.
+ *
+ * For a fresh session (no fork), the task is also passed as pi's initial
+ * prompt so the new conversation starts working immediately instead of
+ * opening empty and waiting for the task to be retyped. A forked session
+ * skips this: `task` there is a fork name/label, not an instruction, and
+ * injecting it into resumed conversation history would just be noise.
+ */
 export function formatPiCommand(task: string, forkSessionFile?: string): string {
-	const forkFlag = forkSessionFile ? ` --fork ${shellQuote(forkSessionFile)}` : "";
-	return `PI_SESSION_NAME=${shellQuote(task)} pi${forkFlag}`;
+	if (forkSessionFile) {
+		return `PI_SESSION_NAME=${shellQuote(task)} pi --fork ${shellQuote(forkSessionFile)}`;
+	}
+	return `PI_SESSION_NAME=${shellQuote(task)} pi ${shellQuote(task)}`;
 }
 
 /**
@@ -366,15 +404,10 @@ export async function launchPiWorkspace(
 
 	if (workspaceRef) {
 		if (!groupRef) {
-			await pi.exec("cmux", [
-				"workspace-group",
-				"create",
-				"--name",
-				projectName,
-				"--from",
-				workspaceRef,
-				"--json",
-			]);
+			// See ensureWorkspaceInGroup for why this isn't a plain
+			// `workspace-group create --from` call: that leaves a stray blank
+			// anchor workspace behind instead of anchoring on workspaceRef itself.
+			await ensureWorkspaceInGroup(pi, { ref: workspaceRef }, projectName);
 		}
 		await sleep(200);
 		await pi.exec("cmux", ["rename-workspace", "--workspace", workspaceRef, title]);
