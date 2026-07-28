@@ -46,6 +46,7 @@ import {
 	type WorktreeInfo,
 } from "./lib/workstreams.js";
 import {
+	ensureWorkspaceInGroup,
 	findWorkspaceForPath,
 	isCmux,
 	launchPiWorkspace,
@@ -91,6 +92,26 @@ export default function workstreamsExtension(pi: ExtensionAPI) {
 		if (effectiveName) {
 			const projectName = record?.projectName ?? path.basename(cwd);
 			ctx.ui.setStatus(WORKSTREAM_STATUS_KEY, `Workstream: ${projectName} · ${effectiveName}`);
+		}
+
+		// Best-effort: make sure this session's cmux workspace is grouped with
+		// its project's other workspaces. Group-joining previously only ran
+		// inside launchPiWorkspace at workspace *creation* time, so a session
+		// started by running `pi` directly in an existing terminal -- never via
+		// /ws -- fell through the cracks and could sit ungrouped indefinitely.
+		if (isCmux() && process.env.CMUX_WORKSPACE_ID) {
+			let projectNameForGroup = record?.projectName;
+			if (!projectNameForGroup) {
+				const mainRoot = await resolveMainRoot(cwd);
+				if (mainRoot) projectNameForGroup = projectInfoForPath(mainRoot)?.name;
+			}
+			if (projectNameForGroup) {
+				await ensureWorkspaceInGroup(
+					pi,
+					{ id: process.env.CMUX_WORKSPACE_ID },
+					projectNameForGroup,
+				);
+			}
 		}
 	});
 

@@ -91,6 +91,8 @@ export type CmuxWorkspaceGroup = {
 	title?: string;
 	label?: string;
 	display_name?: string;
+	member_workspace_ids?: string[];
+	member_workspace_refs?: string[];
 };
 
 export type CmuxWorkspaceTarget = { id?: string; ref?: string };
@@ -149,6 +151,58 @@ export function parseCmuxWorkspaceGroup(output: string): CmuxWorkspaceGroup | un
 	} catch {
 		const match = trimmed.match(/workspace_group:\S+/);
 		return match ? { ref: match[0] } : undefined;
+	}
+}
+
+/**
+ * Best-effort: make sure a workspace is a member of its project's cmux group,
+ * creating the group (anchored on this workspace) if none exists yet for the
+ * project name. Silently no-ops on any failure -- group bookkeeping must
+ * never block workspace switching or session start.
+ *
+ * This exists because group-joining previously only ran at workspace
+ * *creation* time (in launchPiWorkspace). A workspace opened outside that
+ * flow -- switched to via an existing-workspace lookup in
+ * openOrSwitchWorkspace, or a session started by running `pi` directly in an
+ * existing terminal -- never went through it, so it could sit ungrouped
+ * indefinitely even though its project's group already existed.
+ */
+export async function ensureWorkspaceInGroup(
+	pi: ExtensionAPI,
+	target: CmuxWorkspaceTarget,
+	projectName: string,
+): Promise<void> {
+	if (!isCmux()) return;
+	if (!target.ref && !target.id) return;
+
+	try {
+		const groups = await listWorkspaceGroups(pi);
+		const group = groups.find((g) => cmuxWorkspaceGroupName(g) === projectName);
+
+		if (!group) {
+			const from = target.ref ?? target.id;
+			if (from) {
+				await pi.exec("cmux", [
+					"workspace-group", "create", "--name", projectName, "--from", from, "--json",
+				]);
+			}
+			return;
+		}
+
+		const groupRef = cmuxWorkspaceGroupRef(group);
+		if (!groupRef) return;
+
+		const alreadyMember =
+			(target.id && group.member_workspace_ids?.includes(target.id)) ||
+			(target.ref && group.member_workspace_refs?.includes(target.ref));
+		if (alreadyMember) return;
+
+		const workspaceArg = target.ref ?? target.id;
+		if (workspaceArg) {
+			await pi.exec("cmux", ["workspace-group", "add", "--group", groupRef, "--workspace", workspaceArg]);
+		}
+	} catch {
+		// best-effort
 	}
 }
 
@@ -356,6 +410,10 @@ export async function openOrSwitchWorkspace(
 				selectResult.stderr.trim() || selectResult.stdout.trim() || "cmux select-workspace failed";
 			ctx.ui.notify(reason, "error");
 		}
+		// Best-effort repair: a workspace found this way may predate group-join
+		// logic, or have been opened outside pi entirely, so it can sit ungrouped
+		// indefinitely otherwise.
+		await ensureWorkspaceInGroup(pi, { ref: existingRef, id: existingWorkspace?.id }, workstream.projectName);
 		return;
 	}
 
