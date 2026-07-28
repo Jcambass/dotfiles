@@ -38,6 +38,15 @@ For small tasks, just do the work.
 
 When a user includes a link, read the linked context before answering or drafting from it. Use the right source-specific tool for the link, for example `gh` for GitHub links, instead of guessing from the URL or surrounding prompt.
 
+## Unrelated tasks in one message
+
+When a single message clearly bundles multiple unrelated tasks (different repos/projects, or topics with no real dependency on each other — e.g. "fix this bug" plus "reword this email" plus "review that unrelated PR"), point this out and ask whether to split the unrelated parts into a `/qc` quick chat or a proper `/ws` workstream, before starting on them.
+
+- Do not do this for sequential steps of the same overall goal, or for small asides within one topic — only for genuinely unrelated work.
+- Never spawn a `/qc` or `/ws` session on my behalf without asking first.
+- `/qc [task]` is the lightweight option: a fresh conversation in its own scratch directory and cmux tab, no git worktree or project ceremony — use it for anything that doesn't need a local checkout at all, including tasks that reference a repo by name only, like monitoring a PR's CI via `gh --repo owner/repo` (`gh` doesn't need a checkout).
+- `/ws new [task]` is the proper-workstream option: use it when the unrelated task is real, ongoing work inside a specific repo that deserves its own git worktree and branch.
+
 ## Waiting on slow external processes (CI, deploys, builds)
 
 There is no background execution after I finish a reply — nothing happens until you prompt me again. Never say "I'll check back shortly" (or similar) and then just stop; that implies a follow-up that will not happen on its own.
