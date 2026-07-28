@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/gotgenes/pi-packages/main/packages/pi-permission-system/schemas/permissions.schema.json",
+  "permission": {
+    "*": "allow",
+    "bash": {
+      "*": "allow",
+
+      "sudo *": "ask",
+
+      "ssh *": "ask",
+      "scp *": "ask",
+      "sftp *": "ask",
+      "autossh *": "ask",
+      "slogin *": "ask",
+      "sshpass *": "ask",
+
+      "chmod 777 *": "ask",
+      "chmod -R 777 *": "ask",
+      "chmod -r 777 *": "ask",
+
+      "rm -rf *": "ask",
+      "rm -r *": "ask",
+      "rm -fr *": "ask",
+      "rm -Rf *": "ask",
+      "rm -fR *": "ask",
+      "rm --recursive *": "ask",
+
+      "rm -rf /tmp/*": "allow",
+      "rm -r /tmp/*": "allow",
+      "rm -fr /tmp/*": "allow",
+      "rm -rf /private/tmp/*": "allow",
+      "rm -r /private/tmp/*": "allow",
+      "rm -fr /private/tmp/*": "allow",
+      "rm -rf /var/folders/*": "allow",
+      "rm -r /var/folders/*": "allow",
+      "rm -fr /var/folders/*": "allow"
+    }
+  }
+}

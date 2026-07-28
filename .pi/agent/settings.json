@@ -25,7 +25,8 @@
   "packages": [
     "npm:pi-mcp-adapter",
     "npm:@juicesharp/rpiv-ask-user-question",
-    "npm:@ayulab/pi-rewind"
+    "npm:@ayulab/pi-rewind",
+    "npm:@gotgenes/pi-permission-system"
   ],
   "terminal": {
     "showTerminalProgress": false
