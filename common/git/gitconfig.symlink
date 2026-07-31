@@ -27,7 +27,7 @@
         commentchar = $
         excludesfile = ~/.gitignore
         editor = vim
-	pager = less -FX
+	pager = hunk pager
 [apply]
         whitespace = nowarn
 [mergetool]

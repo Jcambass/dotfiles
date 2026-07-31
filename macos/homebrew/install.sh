@@ -50,6 +50,7 @@ if command -v brew >/dev/null 2>&1; then
   command -v npm >/dev/null 2>&1 || missing_brews="$missing_brews node"
   command -v opencode >/dev/null 2>&1 || missing_brews="$missing_brews opencode"
   command -v pup >/dev/null 2>&1 || missing_brews="$missing_brews pup"
+  command -v hunk >/dev/null 2>&1 || missing_brews="$missing_brews hunk"
 
   if [ -n "$missing_brews" ]; then
     echo "  Installing agent toolchain with Homebrew."

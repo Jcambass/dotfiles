@@ -79,6 +79,21 @@ Before reviewing:
 
 Do not review from a summary alone when source files are available.
 
+## Hunk (interactive diff viewer)
+
+`git diff`/`git show` open in Hunk (a terminal diff viewer) by default now --
+`core.pager` is set to `hunk pager`. That only affects interactive terminal
+output; keep reading diffs the normal way (`git diff`, `git diff --cached`,
+etc.) for your own analysis -- git skips the pager entirely for non-tty/piped
+output, so this doesn't change anything above.
+
+If the user has a live Hunk session open, or asks to walk through a diff
+interactively / leave inline notes for them to see in Hunk, do NOT run
+`hunk diff`/`hunk show` yourself (that TUI is for the user). Instead run
+`hunk skill path` to get the current bundled Hunk-session skill file, read it,
+and follow its `hunk session *` workflow to inspect the session and add
+inline comments.
+
 ## Review checklist
 
 Read `references/checklist.md` and apply it to each changed file. Focus on real
