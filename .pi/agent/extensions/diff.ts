@@ -1,14 +1,18 @@
 /**
  * Diff Extension
  *
- * /diff — interactive picker for git-changed files, opens diffs in VS Code Insiders.
+ * /diff — interactive picker for git-changed files, opens diffs in Hunk.
  *   - Enter: open selected file's diff
  *   - a: open all diffs
  *   - Esc: close
  *
+ * /diff code — use VS Code Insiders instead.
  * /diff vim — use Vim/vimdiff instead, with Pi's TUI suspended while Vim runs.
  * /diff all — open all changed files directly (no picker).
  * /diff all vim — open all changed files in Vim diff mode.
+ *
+ * Hunk and Vim both take over the terminal, so Pi's TUI is suspended while
+ * either runs, same as `/diff vim` already did.
  *
  * Temp files (HEAD versions for diff tools) use a per-process directory
  * that's cleaned up on process exit and at the start of each invocation.
@@ -62,9 +66,14 @@ interface DiffArgs {
 
 function parseDiffArgs(args: string | undefined): DiffArgs {
 	const tokens = args?.trim().toLowerCase().split(/\s+/).filter(Boolean) ?? [];
+	const editor: EditorMode = tokens.some((t) => t === "vim" || t === "vi" || t === "nvim")
+		? "vim"
+		: tokens.includes("code")
+			? "code"
+			: "hunk";
 	return {
 		all: tokens.includes("all"),
-		editor: tokens.some((t) => t === "vim" || t === "vi" || t === "nvim") ? "vim" : "code",
+		editor,
 	};
 }
 
@@ -115,7 +124,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.registerCommand("diff", {
-		description: "Show git changes and open diffs in VS Code Insiders or Vim (/diff [all] [vim])",
+		description: "Show git changes and open diffs in Hunk, VS Code Insiders, or Vim (/diff [all] [hunk|code|vim])",
 		handler: async (args, ctx) => {
 			const parsed = parseDiffArgs(args);
 			const root = await projectRoot(pi, ctx.cwd);
@@ -129,8 +138,8 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			if (parsed.editor === "vim" && ctx.mode !== "tui") {
-				ctx.ui.notify("Vim diff mode requires Pi TUI", "error");
+			if ((parsed.editor === "vim" || parsed.editor === "hunk") && ctx.mode !== "tui") {
+				ctx.ui.notify(`${editorLabel(parsed.editor)} diff mode requires Pi TUI`, "error");
 				return;
 			}
 
@@ -180,9 +189,18 @@ export default function (pi: ExtensionAPI) {
 				if (r !== 0) throw new Error(`${command} exited ${r}`);
 			};
 
+			// Hunk's diff engine reads real git diff data, so unlike the Vim/VS Code
+			// paths above it needs no special-casing for untracked/added/deleted
+			// files -- a pathspec-narrowed `hunk diff -- <file>` handles all of them.
+			const openHunkDiff = async (file: FileInfo): Promise<void> => {
+				const r = await runTerminal("hunk", ["diff", "--", file.file]);
+				if (r !== 0) throw new Error(`hunk exited ${r}`);
+			};
+
 			const openDiff = async (file: FileInfo): Promise<void> => {
 				try {
 					if (parsed.editor === "vim") await openVimDiff(file);
+					else if (parsed.editor === "hunk") await openHunkDiff(file);
 					else await openCodeDiff(file);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
@@ -225,8 +243,19 @@ export default function (pi: ExtensionAPI) {
 				return { opened, errors };
 			};
 
+			// One `hunk diff` process shows every changed file (including untracked
+			// and deleted) in Hunk's own multi-file navigator, so "all" is a single
+			// invocation rather than a per-file loop.
+			const openAllHunkDiffs = async (): Promise<{ opened: number; errors: string[] }> => {
+				const r = await runTerminal("hunk", ["diff"]);
+				if (r !== 0) return { opened: 0, errors: files.map((f) => f.file) };
+				return { opened: files.length, errors: [] };
+			};
+
 			const openAllDiffs = async (): Promise<{ opened: number; errors: string[] }> => {
-				return parsed.editor === "vim" ? openAllVimDiffs() : openAllCodeDiffs();
+				if (parsed.editor === "vim") return openAllVimDiffs();
+				if (parsed.editor === "hunk") return openAllHunkDiffs();
+				return openAllCodeDiffs();
 			};
 
 			// /diff all — skip picker, open everything

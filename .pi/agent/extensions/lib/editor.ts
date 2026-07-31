@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import * as path from "node:path";
 
-export type EditorMode = "code" | "vim";
+export type EditorMode = "code" | "vim" | "hunk";
 
 const VIM_QUIT_ALL_ABBREV = 'cnoreabbrev <expr> q getcmdtype() ==# ":" && getcmdline() ==# "q" ? "qa" : "q"';
 
@@ -23,7 +23,9 @@ export function codeCommand(): string {
 }
 
 export function editorLabel(editor: EditorMode): string {
-	return editor === "vim" ? "Vim" : "VS Code Insiders";
+	if (editor === "vim") return "Vim";
+	if (editor === "hunk") return "Hunk";
+	return "VS Code Insiders";
 }
 
 export function vimArgs(...args: string[]): string[] {
