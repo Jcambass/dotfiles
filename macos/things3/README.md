@@ -54,7 +54,7 @@ line per item.
 | `add-todo --title ... [--notes] [--when] [--deadline] [--tags a,b] [--checklist "item1,item2"] [--list "Project Name"] [--heading ...]` | Create a new todo |
 | `add-project --title ... [--notes] [--when] [--deadline] [--tags a,b] [--area "Area Name"] [--todos "todo1,todo2"]` | Create a new project |
 | `update-todo <uuid> [--title] [--notes] [--when] [--deadline] [--tags a,b] [--add-tags a,b] [--completed] [--canceled] [--list ...] [--heading ...]` | Update an existing todo |
-| `update-project <uuid> [--title] [--notes] [--when] [--deadline] [--tags a,b] [--completed] [--canceled]` | Update an existing project |
+| `update-project <uuid> [--title] [--notes] [--when] [--deadline] [--tags a,b] [--area "Area Name"] [--completed] [--canceled]` | Update an existing project |
 | `add-area --title ...` | Create a new area (via AppleScript; no URL-scheme command exists) |
 | `update-area <uuid> [--title] [--tags a,b]` | Update an existing area (via AppleScript) |
 | `show <uuid>` | Open a specific item in Things |

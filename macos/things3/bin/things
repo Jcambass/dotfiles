@@ -158,6 +158,7 @@ def update_project_url(
     when: Optional[str] = None,
     deadline: Optional[str] = None,
     tags: Optional[List[str]] = None,
+    area_title: Optional[str] = None,
     completed: Optional[bool] = None,
     canceled: Optional[bool] = None,
 ) -> str:
@@ -168,6 +169,7 @@ def update_project_url(
         "when": when,
         "deadline": deadline,
         "tags": tags,
+        "area": area_title,
         "completed": completed,
         "canceled": canceled,
     }
@@ -400,6 +402,7 @@ def cmd_update_project(args: argparse.Namespace) -> None:
         when=args.when,
         deadline=args.deadline,
         tags=split_csv(args.tags),
+        area_title=args.area,
         completed=True if args.completed else None,
         canceled=True if args.canceled else None,
     )
@@ -514,6 +517,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--when")
     sp.add_argument("--deadline")
     sp.add_argument("--tags", help="Comma-separated tag names (replaces existing tags)")
+    sp.add_argument("--area", help="Area title to move the project into")
     sp.add_argument("--completed", action="store_true", help="Mark as completed")
     sp.add_argument("--canceled", action="store_true", help="Mark as canceled")
     sp.set_defaults(func=cmd_update_project)
