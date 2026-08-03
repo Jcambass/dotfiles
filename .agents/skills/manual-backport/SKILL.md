@@ -143,16 +143,32 @@ rm -rf "$TMPBIN"
 
 Report a table of branch → PR URL, and always include a GitHub search link
 that shows every backport PR for the original PR number, so they're easy to
-find again later without hunting through comments:
+find again later without hunting through comments.
 
-```
-https://github.com/<owner>/<repo>/pulls?q=is%3Apr+in%3Atitle%3A%22Backport+<PR>%22
-```
+Be careful here — two tempting query shapes are both noisy in practice:
 
-Verify it actually returns all of them before sharing it:
+- Bare keywords with no scoping (`backport <PR>`, no `in:title`/quotes) also
+  matches the source PR itself and any unrelated PR that happens to mention
+  the number in its body or comments (seen in practice: a PR whose body just
+  linked back to the source PR).
+- `in:title:"phrase"` (colon directly before the quoted phrase) is parsed
+  more loosely by the GitHub web UI than by the search API — the same query
+  that returns exactly the right results through `gh`/the API can return
+  extra noise when pasted into the web search box. Use a **space** between
+  `in:title` and the quoted phrase, not a colon, and include the ` for` that
+  always follows the PR number in these generated titles to anchor it to the
+  exact backport title pattern instead of any title with both words in it:
+
+  ```
+  https://github.com/<owner>/<repo>/pulls?q=is%3Apr+in%3Atitle+%22Backport+<PR>+for%22
+  ```
+
+Verify it actually returns only the backport PRs (nothing else) before
+sharing it — the API result is what the web link will actually show, so
+checking it this way is reliable:
 
 ```bash
-gh pr list --repo <owner>/<repo> --search 'in:title "Backport <PR>"' --state all --json number,title
+gh pr list --repo <owner>/<repo> --search 'in:title "Backport <PR> for"' --state all --json number,title
 ```
 
 ## Notes
