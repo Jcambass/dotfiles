@@ -41,14 +41,15 @@ clickable (OSC 8) link, styled underlined since terminals don't style
 hyperlinks on their own. Header shows how long ago the list last refreshed.
 
 The table's `CI` column is deliberately compact -- just whether *something*
-needs attention: `ok` (green, nothing to do), `req` (red, a **required**
-check is failing/waiting/external), or `opt` (yellow, only non-required
-checks are). GitHub's required-check list comes from `gh pr checks
---required` (statusCheckRollup has no such flag itself). A failing check is
-only actually rerunnable once its whole Actions run has finished -- `gh run
-rerun` refuses mid-run ("cannot be rerun; This workflow is already
-running") even if one job in it already failed; the table doesn't
-distinguish that, the detail pane does.
+needs attention: `ok` (green, everything's done and passed), `wait` (blue,
+still running, nothing failed yet -- not the same as `ok`, it could still
+fail), `req` (red, a **required** check is failing/waiting/external), or
+`opt` (yellow, only non-required checks are). GitHub's required-check list
+comes from `gh pr checks --required` (statusCheckRollup has no such flag
+itself). A failing check is only actually rerunnable once its whole Actions
+run has finished -- `gh run rerun` refuses mid-run ("cannot be rerun; This
+workflow is already running") even if one job in it already failed; the
+table doesn't distinguish that, the detail pane does.
 
 Below the table, a detail pane for the *selected* PR shows what the table
 can't: every failing check with its required/optional status and exactly

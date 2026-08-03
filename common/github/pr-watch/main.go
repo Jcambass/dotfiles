@@ -286,16 +286,25 @@ func buildCheckDetails(checks []checkRun, required map[string]bool) []checkDetai
 // tableCI derives the table's single compact CI column from check details:
 // "ok" (nothing needs attention), "req" (a required check needs attention --
 // retry, wait, or external/inspect), or "opt" (only non-required checks do).
+// tableCI derives the table's single compact CI column from check details:
+// "ok" (green, nothing to do), "req"/"opt" (red/yellow, a required or only
+// optional check needs attention), or "wait" (blue, nothing has failed but
+// checks are still running -- distinct from "ok" since it could still go
+// either way, not something to look away from).
 func tableCI(details []checkDetail) (label string, color int) {
-	reqAttention, optAttention := false, false
+	reqAttention, optAttention, pending := false, false, false
 	for _, d := range details {
-		if d.Action == actionPass || d.Action == actionPending {
+		switch d.Action {
+		case actionPass:
 			continue
-		}
-		if d.Required {
-			reqAttention = true
-		} else {
-			optAttention = true
+		case actionPending:
+			pending = true
+		default:
+			if d.Required {
+				reqAttention = true
+			} else {
+				optAttention = true
+			}
 		}
 	}
 	switch {
@@ -303,6 +312,8 @@ func tableCI(details []checkDetail) (label string, color int) {
 		return "req", colorRed
 	case optAttention:
 		return "opt", colorYellow
+	case pending:
+		return "wait", colorBlue
 	default:
 		return "ok", colorGreen
 	}
@@ -795,6 +806,7 @@ const (
 	colorRed    = 1
 	colorYellow = 3
 	colorGray   = 8
+	colorBlue   = 4
 	colorLink   = 6
 	bgSelected  = 238
 )
@@ -1032,6 +1044,9 @@ func renderDetail(p *pr, width int) []string {
 		}
 	}
 	lines = append(lines, fmt.Sprintf("CI: %d failing \u00b7 %d pending \u00b7 %d passing", failing, pending, passing))
+	if failing == 0 && pending > 0 {
+		lines = append(lines, fg(colorBlue, "still running -- nothing to do yet, not the same as passing"))
+	}
 	const maxCheckLines = 6
 	for i, l := range attention {
 		if i >= maxCheckLines {
