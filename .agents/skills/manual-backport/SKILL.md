@@ -139,6 +139,22 @@ ls "$TMPBIN"
 rm -rf "$TMPBIN"
 ```
 
+## When every branch is done
+
+Report a table of branch → PR URL, and always include a GitHub search link
+that shows every backport PR for the original PR number, so they're easy to
+find again later without hunting through comments:
+
+```
+https://github.com/<owner>/<repo>/pulls?q=is%3Apr+in%3Atitle%3A%22Backport+<PR>%22
+```
+
+Verify it actually returns all of them before sharing it:
+
+```bash
+gh pr list --repo <owner>/<repo> --search 'in:title "Backport <PR>"' --state all --json number,title
+```
+
 ## Notes
 
 - Opening the backport PR is separate from getting it merged — it still
