@@ -40,12 +40,17 @@ When a user includes a link, read the linked context before answering or draftin
 
 ## Unrelated tasks in one message
 
-When a single message clearly bundles multiple unrelated tasks (different repos/projects, or topics with no real dependency on each other — e.g. "fix this bug" plus "reword this email" plus "review that unrelated PR"), point this out and ask whether to split the unrelated parts into a `/qc` quick chat or a proper `/ws` workstream, before starting on them.
+When a single message clearly bundles multiple unrelated tasks (different repos/projects, or topics with no real dependency on each other — e.g. "fix this bug" plus "reword this email" plus "review that unrelated PR"), point this out and ask whether to split the unrelated parts into a separate session, before starting on them.
 
 - Do not do this for sequential steps of the same overall goal, or for small asides within one topic — only for genuinely unrelated work.
-- Never spawn a `/qc` or `/ws` session on my behalf without asking first.
-- `/qc [task]` is the lightweight option: a fresh conversation in its own scratch directory and cmux tab, no git worktree or project ceremony — use it for anything that doesn't need a local checkout at all, including tasks that reference a repo by name only, like monitoring a PR's CI via `gh --repo owner/repo` (`gh` doesn't need a checkout).
-- `/ws new [task]` is the proper-workstream option: use it when the unrelated task is real, ongoing work inside a specific repo that deserves its own git worktree and branch.
+- Never start a separate session on my behalf without asking first.
+- Lightweight option: a fresh session with no project ceremony, for anything that doesn't need a local checkout at all — including tasks that reference a repo by name only, like monitoring a PR's CI via `gh --repo owner/repo` (`gh` doesn't need a checkout).
+- Heavier option: a session scoped to its own checkout/worktree and branch, for real ongoing work inside a specific repo.
+
+This repo's pi setup and this guidance are meant to be cross-tool (confirmed: a Copilot CLI session auto-loads this file and this repo's `.agents/skills/`), but the concrete commands below are pi-only:
+
+- **Under pi**, with the workstreams/quick-chat extensions available (`/qc` and `/ws` show up as commands): use `/qc [task]` for the lightweight option and `/ws new [task]` for the heavier one.
+- **Under any other tool** (e.g. GitHub Copilot CLI) where those commands don't exist: use that tool's own equivalent instead of referencing a command that isn't there. For Copilot CLI, that means starting a new `copilot` session yourself in the right directory (`copilot --cloud` for a fully isolated one) — there's no built-in equivalent to `/ws`'s automatic worktree+tab creation, so say plainly that's what you're doing instead of assuming one exists.
 
 ## Waiting on slow external processes (CI, deploys, builds)
 
