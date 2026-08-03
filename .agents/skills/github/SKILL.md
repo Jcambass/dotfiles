@@ -46,6 +46,10 @@ When the user asks for a GitHub Copilot review on a PR, use the requested-review
 
 Never post `@copilot review this`; that does not create the requested-reviewer review flow. Use `references/command-reference.md` for the exact commands.
 
+## Monitoring PRs
+
+To keep an eye on a set of PRs (CI status, review status, state) without a heavyweight dashboard, use `pr-watch` (see `common/github/README.md`). In pi, `/prs [ref ...]` opens it in a new cmux pane split in the current workspace; `/prs add|remove|list` manages a persisted watch list. For a single non-interactive check, run `pr-watch --once --json <ref>` directly instead of gh-dash.
+
 ## Rules
 
 1. **Always use `gh` CLI** — never `curl`, `fetch`, or direct HTTP to `api.github.com`.

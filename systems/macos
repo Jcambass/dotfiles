@@ -6,6 +6,7 @@ common/tmux
 common/vim
 common/notes
 common/zsh
+common/github
 macos/homebrew
 macos/asdf
 macos/brew-git
