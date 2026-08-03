@@ -28,16 +28,35 @@ pr-watch [ref ...]        watch these PRs, or the persisted list if none given
 pr-watch --interval 15    refresh interval in seconds (default 30)
 ```
 
-Keys: `↑/↓`/`j`/`k` move selection, `a` add, `d`/`x` remove selected, `r` retry
-failed CI for the selected PR (`gh run rerun --failed` on its failing runs),
-`f` asks a fresh, tool-less `pi` session to look at the PR's diff and the
-failing check's logs (or its name/context if it's an external status check
-with no log, like a merge-stop bot) and judge whether the failure is
+Keys: `↑/↓`/`j`/`k` move selection (the detail pane below the table follows
+the selection), `a` add, `d`/`x` remove selected, `r` retry failed CI for the
+selected PR (`gh run rerun --failed` on its failing, actually-rerunnable
+runs), `f` asks a fresh, tool-less `pi` session to look at the PR's diff and
+the failing check's logs (or its name/context if it's an external status
+check with no log, like a merge-stop bot) and judge whether the failure is
 **pr-caused**, **unrelated** (flaky/pre-existing/infra), or **unclear** --
 the same call you'd ask an agent to make manually, instead of empirically
 re-running CI to guess. `o` open in browser, `q` quit. `repo#123` is a single
 clickable (OSC 8) link, styled underlined since terminals don't style
 hyperlinks on their own. Header shows how long ago the list last refreshed.
+
+The table's `CI` column is deliberately compact -- just whether *something*
+needs attention: `ok` (green, nothing to do), `req` (red, a **required**
+check is failing/waiting/external), or `opt` (yellow, only non-required
+checks are). GitHub's required-check list comes from `gh pr checks
+--required` (statusCheckRollup has no such flag itself). A failing check is
+only actually rerunnable once its whole Actions run has finished -- `gh run
+rerun` refuses mid-run ("cannot be rerun; This workflow is already
+running") even if one job in it already failed; the table doesn't
+distinguish that, the detail pane does.
+
+Below the table, a detail pane for the *selected* PR shows what the table
+can't: every failing check with its required/optional status and exactly
+why it can't be rerun yet (still running vs. an external non-Actions check),
+and the AI verdict/reason from `f`, persisted for the session instead of
+flashing by in a 6-second status line. It's capped to fit the terminal
+height, with the table always taking priority over the detail pane if space
+is tight.
 
 ### Headless (scripting / agent use)
 
@@ -48,6 +67,9 @@ pr-watch --list                 print the persisted list and exit
 pr-watch --once [<ref> ...]     render one snapshot and exit (no loop, no input)
 pr-watch --json [<ref> ...]     raw JSON instead of a table (for scripting)
 ```
+
+`--json` includes each check's name/workflow/required/action and the
+persisted AI verdict/reason, not just the coarse overall CI state.
 
 The persisted list lives at `~/.config/pr-watch/list` (one ref per line,
 untracked, machine-local). When watching it (no refs given on the command

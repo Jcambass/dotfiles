@@ -126,26 +126,15 @@ func rollupStatus(checks []checkRun) string {
 		return "none"
 	}
 	failing, pending := false, false
-	failConclusions := map[string]bool{
-		"FAILURE": true, "CANCELLED": true, "TIMED_OUT": true,
-		"ACTION_REQUIRED": true, "STARTUP_FAILURE": true,
-	}
 	for _, c := range checks {
-		if c.Status != "" { // CheckRun
-			if c.Status != "COMPLETED" {
-				pending = true
-				continue
-			}
-			if failConclusions[c.Conclusion] {
-				failing = true
-			}
-		} else if c.State != "" { // StatusContext
-			switch c.State {
-			case "FAILURE", "ERROR":
-				failing = true
-			case "PENDING", "EXPECTED":
-				pending = true
-			}
+		if isFailedCheck(c) {
+			failing = true
+			continue
+		}
+		if c.Status != "" && c.Status != "COMPLETED" {
+			pending = true
+		} else if c.State == "PENDING" || c.State == "EXPECTED" {
+			pending = true
 		}
 	}
 	if failing {
@@ -169,6 +158,32 @@ func isFailedCheck(c checkRun) bool {
 		c.State == "FAILURE" || c.State == "ERROR"
 }
 
+// runIDOf extracts the Actions run id from a CheckRun's detailsUrl, if any.
+func runIDOf(c checkRun) (string, bool) {
+	m := runIDPattern.FindStringSubmatch(c.DetailsURL)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// runStillInProgress reports whether any check sharing the given run id
+// hasn't completed yet -- gh refuses to rerun a run while it's still going
+// ("cannot be rerun; This workflow is already running"), even if one job
+// within it has already failed.
+func runStillInProgress(checks []checkRun, runID string) bool {
+	for _, c := range checks {
+		id, ok := runIDOf(c)
+		if !ok || id != runID {
+			continue
+		}
+		if c.Status != "COMPLETED" {
+			return true
+		}
+	}
+	return false
+}
+
 func failedRunIDs(checks []checkRun) []string {
 	seen := map[string]bool{}
 	var ids []string
@@ -176,14 +191,147 @@ func failedRunIDs(checks []checkRun) []string {
 		if !isFailedCheck(c) {
 			continue
 		}
-		m := runIDPattern.FindStringSubmatch(c.DetailsURL)
-		if m == nil || seen[m[1]] {
+		id, ok := runIDOf(c)
+		if !ok || seen[id] {
 			continue
 		}
-		seen[m[1]] = true
-		ids = append(ids, m[1])
+		seen[id] = true
+		ids = append(ids, id)
 	}
 	return ids
+}
+
+// rerunableRunIDs is the subset of failedRunIDs whose run has actually
+// finished (gh run rerun --failed only works once the run is done, even
+// though an individual job within it can fail while siblings are still
+// running).
+func rerunableRunIDs(checks []checkRun) []string {
+	var ids []string
+	for _, id := range failedRunIDs(checks) {
+		if !runStillInProgress(checks, id) {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// checkName returns a check's display name regardless of whether it's a
+// CheckRun (name) or StatusContext (context).
+func checkName(c checkRun) string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return c.Context
+}
+
+// checkURL returns whichever URL field is populated (CheckRun's detailsUrl
+// or StatusContext's targetUrl).
+func checkURL(c checkRun) string {
+	if c.DetailsURL != "" {
+		return c.DetailsURL
+	}
+	return c.TargetURL
+}
+
+type checkAction string
+
+const (
+	actionPass     checkAction = "pass"
+	actionPending  checkAction = "pending"
+	actionRetry    checkAction = "retry"    // failing, safe to rerun right now
+	actionWait     checkAction = "wait"     // failing, run still in progress
+	actionExternal checkAction = "external" // failing, not an Actions run at all
+)
+
+// checkDetail is the single source of truth for both the table's compact CI
+// column and the detail pane's full breakdown -- computed once per fetch.
+type checkDetail struct {
+	Name     string
+	Workflow string
+	URL      string
+	Required bool
+	Action   checkAction
+}
+
+func buildCheckDetails(checks []checkRun, required map[string]bool) []checkDetail {
+	details := make([]checkDetail, 0, len(checks))
+	for _, c := range checks {
+		d := checkDetail{
+			Name:     checkName(c),
+			Workflow: c.WorkflowName,
+			URL:      checkURL(c),
+			Required: required[checkName(c)],
+		}
+		switch {
+		case isFailedCheck(c):
+			id, hasRunID := runIDOf(c)
+			switch {
+			case !hasRunID:
+				d.Action = actionExternal
+			case runStillInProgress(checks, id):
+				d.Action = actionWait
+			default:
+				d.Action = actionRetry
+			}
+		case (c.Status != "" && c.Status != "COMPLETED") || c.State == "PENDING" || c.State == "EXPECTED":
+			d.Action = actionPending
+		default:
+			d.Action = actionPass
+		}
+		details = append(details, d)
+	}
+	return details
+}
+
+// tableCI derives the table's single compact CI column from check details:
+// "ok" (nothing needs attention), "req" (a required check needs attention --
+// retry, wait, or external/inspect), or "opt" (only non-required checks do).
+func tableCI(details []checkDetail) (label string, color int) {
+	reqAttention, optAttention := false, false
+	for _, d := range details {
+		if d.Action == actionPass || d.Action == actionPending {
+			continue
+		}
+		if d.Required {
+			reqAttention = true
+		} else {
+			optAttention = true
+		}
+	}
+	switch {
+	case reqAttention:
+		return "req", colorRed
+	case optAttention:
+		return "opt", colorYellow
+	default:
+		return "ok", colorGreen
+	}
+}
+
+// requiredCheckNames asks gh which checks are required on this PR (gh pr
+// view's statusCheckRollup has no required flag of its own).
+func requiredCheckNames(ref string) map[string]bool {
+	result := map[string]bool{}
+	_, ghArgs, err := normalizeRef(ref)
+	if err != nil {
+		return result
+	}
+	args := append([]string{"pr", "checks"}, ghArgs...)
+	args = append(args, "--required", "--json", "name")
+	out, err := exec.Command("gh", args...).Output()
+	if err != nil {
+		return result
+	}
+	var rows []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(out, &rows); err != nil {
+		return result
+	}
+	for _, r := range rows {
+		result[r.Name] = true
+	}
+	return result
 }
 
 func repoFromURL(url string) string {
@@ -219,12 +367,13 @@ type pr struct {
 	ref      string
 	repo     string
 	data     *ghPR
-	ci       string
+	ci       string // coarse passing/failing/pending/none -- used for retry/analyze gating and JSON
+	checks   []checkDetail
 	errMsg   string
 	retrying bool
 
 	analyzing bool
-	aiVerdict string // "flaky", "pr-caused", "unrelated", "unclear"
+	aiVerdict string // "pr-caused", "unrelated", "unclear"
 	aiReason  string
 	aiSha     string // commit sha the verdict was computed against
 	lastSha   string
@@ -249,11 +398,13 @@ func fetchOne(ref string) *pr {
 	if err := json.Unmarshal(out, &data); err != nil {
 		return &pr{ref: display, errMsg: "failed to parse gh output"}
 	}
+	required := requiredCheckNames(ref)
 	return &pr{
-		ref:  display,
-		repo: repoFromURL(data.URL),
-		data: &data,
-		ci:   rollupStatus(data.Checks),
+		ref:    display,
+		repo:   repoFromURL(data.URL),
+		data:   &data,
+		ci:     rollupStatus(data.Checks),
+		checks: buildCheckDetails(data.Checks, required),
 	}
 }
 
@@ -283,6 +434,7 @@ type model struct {
 	lastRefresh time.Time
 	interval    time.Duration
 	width       int
+	height      int
 
 	adding bool
 	input  textinput.Model
@@ -290,6 +442,7 @@ type model struct {
 	status      string
 	statusUntil time.Time
 
+	headless bool // --once/--json render: no interactivity, no footer
 	quitting bool
 }
 
@@ -391,9 +544,13 @@ func (m *model) applyAction(action string) tea.Cmd {
 			m.setStatus("no failing checks to retry for " + p.ref)
 			return nil
 		}
-		ids := failedRunIDs(p.data.Checks)
+		ids := rerunableRunIDs(p.data.Checks)
 		if len(ids) == 0 {
-			m.setStatus("couldn't find a run id to rerun for " + p.ref)
+			if len(failedRunIDs(p.data.Checks)) > 0 {
+				m.setStatus(p.ref + "'s failing run is still going -- can't rerun until it finishes")
+			} else {
+				m.setStatus("nothing rerunable for " + p.ref + " (external check, or no run id)")
+			}
 			return nil
 		}
 		p.retrying = true
@@ -423,6 +580,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 		return m, nil
 
 	case tea.KeyMsg:
@@ -488,7 +646,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		rowCount := len(m.prs)
-		if msg.Y == footerLineForRowCount(rowCount) {
+		if msg.Y == footerLineForRowCount(rowCount, len(computeDetailLines(m))) {
 			_, zones := buttonRow()
 			for _, z := range zones {
 				if msg.X >= z.start && msg.X < z.end {
@@ -695,40 +853,6 @@ func truncate(s string, width int) string {
 	return s[:width-1] + "…"
 }
 
-func ciBadge(p *pr) (string, int) {
-	switch p.ci {
-	case "passing":
-		return "passing", colorGreen
-	case "failing":
-		return "failing", colorRed
-	case "pending":
-		return "pending", colorYellow
-	case "none":
-		return "-", colorGray
-	default:
-		return "error", colorRed
-	}
-}
-
-func aiBadge(p *pr) string {
-	if p.analyzing {
-		return fg(colorYellow, " (analyzing…)")
-	}
-	// A verdict computed against an older commit is stale; fetchedMsg clears
-	// it on a new sha, but guard here too in case of ordering surprises.
-	if p.aiVerdict == "" || (p.data != nil && p.aiSha != "" && p.aiSha != p.data.HeadRefOid) {
-		return ""
-	}
-	switch p.aiVerdict {
-	case "unrelated":
-		return fg(colorYellow, " (unrelated?)")
-	case "pr-caused":
-		return fg(colorRed, " (pr-caused)")
-	default:
-		return fg(colorGray, " (unclear)")
-	}
-}
-
 func reviewBadge(decision string) (string, int) {
 	switch decision {
 	case "APPROVED":
@@ -814,13 +938,163 @@ func tableRowLine(rowIndex int) int {
 	return headerLines + rowIndex
 }
 
-// footerLineForRowCount returns the 0-based output line of the button row.
-func footerLineForRowCount(rowCount int) int {
+// footerLineForRowCount returns the 0-based output line of the button row,
+// given how many table rows and detail-pane lines are rendered above it.
+func footerLineForRowCount(rowCount, detailLineCount int) int {
 	rowLines := rowCount
 	if rowCount == 0 {
 		rowLines = 1 // "(empty ...)" line
 	}
-	return headerLines + rowLines + 1 // +1 for the blank line before the footer
+	line := headerLines + rowLines + 1 // +1 for the blank line before detail/footer
+	if detailLineCount > 0 {
+		line += detailLineCount + 1 // detail lines + blank line before footer
+	}
+	return line
+}
+
+func selectedPR(m model) *pr {
+	if m.cursor < 0 || m.cursor >= len(m.prs) {
+		return nil
+	}
+	return m.prs[m.cursor]
+}
+
+func aiStale(p *pr) bool {
+	return p.data != nil && p.aiSha != "" && p.aiSha != p.data.HeadRefOid
+}
+
+var checkActionLabel = map[checkAction]string{
+	actionRetry:    "retry-ready",
+	actionWait:     "waiting -- run still in progress",
+	actionExternal: "external check -- no rerun available",
+}
+
+// renderDetail is the full breakdown for the selected PR: CI checks grouped
+// by required/optional with per-check rerun status, and the persisted AI
+// verdict/reason (not just a transient status line).
+func renderDetail(p *pr, width int) []string {
+	if p == nil {
+		return nil
+	}
+	var lines []string
+
+	if p.errMsg != "" {
+		rule := "── " + p.ref + " "
+		if width > len(rule) {
+			rule += strings.Repeat("─", width-len(rule))
+		}
+		lines = append(lines, dimText(rule))
+		lines = append(lines, fg(colorRed, truncate(p.errMsg, width)))
+		return lines
+	}
+	if p.data == nil {
+		return lines
+	}
+
+	title := fmt.Sprintf("%s#%d", p.repo, p.data.Number)
+	rule := "── " + title + " "
+	if width > len(rule) {
+		rule += strings.Repeat("─", width-len(rule))
+	}
+	lines = append(lines, dimText(rule))
+
+	state := strings.ToLower(p.data.State)
+	if p.data.IsDraft && state == "open" {
+		state = "draft"
+	}
+	reviewText, _ := reviewBadge(p.data.ReviewDecision)
+	lines = append(lines, truncate(p.data.Title, width)+dimText("  ("+state+" \u00b7 "+reviewText+")"))
+
+	var failing, pending, passing int
+	var attention []string
+	for _, c := range p.checks {
+		switch c.Action {
+		case actionPass:
+			passing++
+		case actionPending:
+			pending++
+		default:
+			failing++
+			reqLabel, reqColor := "optional", colorYellow
+			if c.Required {
+				reqLabel, reqColor = "required", colorRed
+			}
+			name := c.Name
+			if c.URL != "" {
+				name = hyperlink(name, c.URL)
+			}
+			line := fmt.Sprintf("  %s  %s  %s", fg(colorRed, "FAIL"), fg(reqColor, padRight(reqLabel, 9)), name)
+			if c.Workflow != "" {
+				line += dimText(" [" + c.Workflow + "]")
+			}
+			line += dimText(" -- " + checkActionLabel[c.Action])
+			attention = append(attention, line)
+		}
+	}
+	lines = append(lines, fmt.Sprintf("CI: %d failing \u00b7 %d pending \u00b7 %d passing", failing, pending, passing))
+	const maxCheckLines = 6
+	for i, l := range attention {
+		if i >= maxCheckLines {
+			lines = append(lines, dimText(fmt.Sprintf("  … +%d more", len(attention)-maxCheckLines)))
+			break
+		}
+		lines = append(lines, l)
+	}
+
+	switch {
+	case p.analyzing:
+		lines = append(lines, fg(colorYellow, "AI: analyzing…"))
+	case p.aiVerdict != "" && !aiStale(p):
+		verdictColor := colorGray
+		switch p.aiVerdict {
+		case "pr-caused":
+			verdictColor = colorRed
+		case "unrelated":
+			verdictColor = colorYellow
+		}
+		lines = append(lines, "AI: "+fg(verdictColor, p.aiVerdict))
+		lines = append(lines, "  "+dimText(truncate(p.aiReason, max(width-2, 10))))
+	case failing > 0:
+		lines = append(lines, dimText("AI: press 'f' to ask whether this failure looks related to the PR"))
+	}
+
+	return lines
+}
+
+// computeDetailLines renders the selected PR's detail pane and caps it to
+// whatever vertical room is left once the table, chrome, and footer are
+// accounted for. Shared by View() (to render) and the mouse handler (to
+// know where the footer/buttons actually land).
+func computeDetailLines(m model) []string {
+	width := m.width
+	if width <= 0 {
+		width = 100
+	}
+	lines := renderDetail(selectedPR(m), width)
+	if len(lines) == 0 {
+		return lines
+	}
+
+	maxLines := 12
+	if m.height > 0 {
+		rowLines := len(m.prs)
+		if rowLines == 0 {
+			rowLines = 1
+		}
+		reserved := headerLines + rowLines + 2 + 1 // chrome + table + 2 blanks + footer
+		avail := m.height - reserved
+		if avail < 0 {
+			avail = 0
+		}
+		maxLines = avail
+	}
+	if len(lines) > maxLines {
+		if maxLines <= 0 {
+			return nil
+		}
+		lines = append(append([]string{}, lines[:maxLines-1]...), dimText("  … (resize terminal for more)"))
+	}
+	return lines
 }
 
 func (m model) View() string {
@@ -828,7 +1102,7 @@ func (m model) View() string {
 		return ""
 	}
 
-	const idxW, prW, ciW, reviewW, stateW = 4, 32, 10, 10, 8
+	const idxW, prW, ciW, reviewW, stateW = 4, 32, 6, 10, 8
 	width := m.width
 	if width <= 0 {
 		width = 100
@@ -868,10 +1142,10 @@ func (m model) View() string {
 		prLabel := fmt.Sprintf("%s#%d", p.repo, p.data.Number)
 		prCell := hyperlink(linkStyle(padRight(prLabel, prW)), p.data.URL)
 
-		ciText, ciColor := ciBadge(p)
-		ciCell := fg(ciColor, padRight(ciText, ciW)) + aiBadge(p)
+		ciText, ciColor := tableCI(p.checks)
+		ciCell := fg(ciColor, padRight(ciText, ciW))
 		if p.retrying {
-			ciCell = fg(colorYellow, padRight("retrying…", ciW))
+			ciCell = fg(colorYellow, padRight("…", ciW))
 		}
 
 		reviewText, reviewColor := reviewBadge(p.data.ReviewDecision)
@@ -902,8 +1176,17 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
+	detailLines := computeDetailLines(m)
+	if len(detailLines) > 0 {
+		b.WriteString("\n")
+		for _, l := range detailLines {
+			b.WriteString(l)
+			b.WriteString("\n")
+		}
+	}
+
 	b.WriteString("\n")
-	if m.cursor < 0 {
+	if m.headless {
 		// Headless render (--once/--json): no interactivity, no footer.
 	} else if m.adding {
 		b.WriteString("add ref: " + m.input.View())
@@ -920,16 +1203,28 @@ func (m model) View() string {
 // Headless mode (no TTY/TUI needed) -- scripting, agent use, list management
 // ---------------------------------------------------------------------------
 
+type jsonCheck struct {
+	Name     string `json:"name"`
+	Workflow string `json:"workflow,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Required bool   `json:"required"`
+	Action   string `json:"action"` // pass/pending/retry/wait/external
+}
+
 type jsonRow struct {
-	Ref            string `json:"ref"`
-	URL            string `json:"url,omitempty"`
-	Number         int    `json:"number,omitempty"`
-	Title          string `json:"title,omitempty"`
-	State          string `json:"state,omitempty"`
-	IsDraft        bool   `json:"isDraft,omitempty"`
-	ReviewDecision string `json:"reviewDecision,omitempty"`
-	CI             string `json:"ci,omitempty"`
-	Error          string `json:"error,omitempty"`
+	Ref            string      `json:"ref"`
+	URL            string      `json:"url,omitempty"`
+	Number         int         `json:"number,omitempty"`
+	Title          string      `json:"title,omitempty"`
+	State          string      `json:"state,omitempty"`
+	IsDraft        bool        `json:"isDraft,omitempty"`
+	ReviewDecision string      `json:"reviewDecision,omitempty"`
+	CI             string      `json:"ci,omitempty"`
+	TableCI        string      `json:"tableCi,omitempty"` // ok/req/opt, see tableCI()
+	Checks         []jsonCheck `json:"checks,omitempty"`
+	AIVerdict      string      `json:"aiVerdict,omitempty"`
+	AIReason       string      `json:"aiReason,omitempty"`
+	Error          string      `json:"error,omitempty"`
 }
 
 func printList(refs []string) {
@@ -995,6 +1290,18 @@ func printJSON(prs []*pr) {
 			row.IsDraft = p.data.IsDraft
 			row.ReviewDecision = p.data.ReviewDecision
 			row.CI = p.ci
+			tableCIText, _ := tableCI(p.checks)
+			row.TableCI = tableCIText
+			for _, c := range p.checks {
+				row.Checks = append(row.Checks, jsonCheck{
+					Name: c.Name, Workflow: c.Workflow, URL: c.URL,
+					Required: c.Required, Action: string(c.Action),
+				})
+			}
+			if p.aiVerdict != "" && !aiStale(p) {
+				row.AIVerdict = p.aiVerdict
+				row.AIReason = p.aiReason
+			}
 		}
 		rows = append(rows, row)
 	}
@@ -1005,7 +1312,13 @@ func printJSON(prs []*pr) {
 // headlessRender reuses the same table layout as the interactive TUI
 // (model.View is a pure function of its fields), with no row selected.
 func headlessRender(prs []*pr) string {
-	m := model{prs: prs, cursor: -1, lastRefresh: time.Now(), quitting: false}
+	cursor := -1
+	if len(prs) == 1 {
+		// Only one PR: showing its detail automatically is unambiguous and
+		// more useful than a bare table for a quick one-off check.
+		cursor = 0
+	}
+	m := model{prs: prs, cursor: cursor, headless: true, lastRefresh: time.Now(), quitting: false}
 	return m.View()
 }
 

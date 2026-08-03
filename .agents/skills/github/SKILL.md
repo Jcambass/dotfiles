@@ -53,8 +53,8 @@ To keep an eye on a set of PRs (CI status, review status, state) without a heavy
 - `/prs [ref ...]` opens a live watcher in a new cmux pane split in the *current* workspace (not a new tab, not the sidebar). With no refs, it watches the persisted list.
 - `/prs add <ref ...>` / `/prs remove <ref ...>` / `/prs list` manage the persisted watch list (`~/.config/pr-watch/list`) without opening anything.
 - A ref is a PR URL, `owner/repo#123`, or a bare number (resolved against the repo in the current directory).
-- The watcher is `pr-watch` (Go/Bubble Tea) -- see `common/github/README.md` for the full command reference. In the TUI, `r` retries failed CI on the selected PR; `f` asks a fresh `pi -p` session to judge whether a failure looks caused by the PR's own changes or is unrelated/flaky (same call you'd ask an agent to make manually -- no CI rerun involved); `o` opens the PR in a browser.
-- For a single non-interactive check (e.g. deciding what to do next, not opening a pane), run `pr-watch --once --json <ref>` directly instead of gh-dash or raw `gh pr checks` parsing.
+- The watcher is `pr-watch` (Go/Bubble Tea) -- see `common/github/README.md` for the full command reference. The table's `CI` column is just `ok`/`req`/`opt` (whether a required or only optional check needs attention); the detail pane below it (follows the selected row) has the real breakdown -- which checks, required-or-not, rerunable-or-not-yet, and the persisted `f` (AI) verdict/reason. `r` retries failed CI on the selected PR; `o` opens the PR in a browser.
+- For a single non-interactive check (e.g. deciding what to do next, not opening a pane), run `pr-watch --once --json <ref>` directly instead of gh-dash or raw `gh pr checks` parsing -- the JSON includes the same per-check and AI detail as the TUI.
 - Never open `gh dash` for this unless the user explicitly asks for it; it's heavier than what's needed here.
 
 ## Rules
