@@ -48,7 +48,14 @@ Never post `@copilot review this`; that does not create the requested-reviewer r
 
 ## Monitoring PRs
 
-To keep an eye on a set of PRs (CI status, review status, state) without a heavyweight dashboard, use `pr-watch` (see `common/github/README.md`). In pi, `/prs [ref ...]` opens it in a new cmux pane split in the current workspace; `/prs add|remove|list` manages a persisted watch list. For a single non-interactive check, run `pr-watch --once --json <ref>` directly instead of gh-dash.
+To keep an eye on a set of PRs (CI status, review status, state) without a heavyweight dashboard, use `/prs` (pi command) or the underlying CLIs directly -- see `common/github/README.md` for full detail.
+
+- `/prs [ref ...]` opens a live watcher in a new cmux pane split in the *current* workspace (not a new tab, not the sidebar). With no refs, it watches the persisted list.
+- `/prs add <ref ...>` / `/prs remove <ref ...>` / `/prs list` manage the persisted watch list (`~/.config/pr-watch/list`) without opening anything.
+- A ref is a PR URL, `owner/repo#123`, or a bare number (resolved against the repo in the current directory).
+- The watcher is `pr-watch` (Go/Bubble Tea) -- see `common/github/README.md` for the full command reference. In the TUI, `r` retries failed CI on the selected PR, `f` retries and labels the result **flaky?**/**confirmed** once checks finish, `o` opens the PR in a browser.
+- For a single non-interactive check (e.g. deciding what to do next, not opening a pane), run `pr-watch --once --json <ref>` directly instead of gh-dash or raw `gh pr checks` parsing.
+- Never open `gh dash` for this unless the user explicitly asks for it; it's heavier than what's needed here.
 
 ## Rules
 

@@ -1,275 +1,33 @@
-#!/usr/bin/env python3
-"""
-pr-watch -- lightweight PR monitor built on the gh CLI. No jq, no gh-dash.
+#!/usr/bin/env bash
+# Build/cache and run the Bubble Tea pr-watch TUI. Same build-cache pattern
+# as .pi/agent/extensions/status-dock.sh, but this is its own tool, not part
+# of the status dock.
 
-Watches an ad hoc or persisted set of PRs (across any repos) and re-renders a
-compact table every N seconds: repo, number, title, CI status, review status,
-state.
+set -euo pipefail
 
-Usage:
-  pr-watch                        watch the persisted list
-  pr-watch <ref> [<ref> ...]      watch these PRs (not persisted)
-  pr-watch --add <ref> [...]      add ref(s) to the persisted list
-  pr-watch --remove <ref> [...]   remove ref(s) from the persisted list
-  pr-watch --list                print the persisted list and exit
-  pr-watch --once [<ref> ...]     render once and exit (no loop)
-  pr-watch --interval 15 ...      refresh interval in seconds (default 30)
+SCRIPT_PATH="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd -P)"
+SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)/pr-watch"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/pi"
+BIN="$CACHE_DIR/pr-watch"
+STAMP="$CACHE_DIR/pr-watch.stamp"
 
-A ref is one of:
-  https://github.com/owner/repo/pull/123
-  owner/repo#123
-  123                              (bare number; resolved against the repo
-                                    in the current directory)
-"""
+mkdir -p "$CACHE_DIR"
 
-import argparse
-import json
-import os
-import subprocess
-import sys
-import time
-from shutil import get_terminal_size
+needs_build=0
+if [[ ! -x "$BIN" || ! -f "$STAMP" ]]; then
+  needs_build=1
+elif find "$SRC_DIR" -type f \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) -newer "$STAMP" | grep -q .; then
+  needs_build=1
+fi
 
-CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "pr-watch")
-LIST_FILE = os.path.join(CONFIG_DIR, "list")
+if [[ "$needs_build" -eq 1 ]]; then
+  if ! command -v go >/dev/null 2>&1; then
+    echo "pr-watch requires Go to build" >&2
+    exit 1
+  fi
+  (cd "$SRC_DIR" && go build -o "$BIN" .)
+  touch "$STAMP"
+fi
 
-FIELDS = "number,title,url,state,isDraft,reviewDecision,statusCheckRollup"
-
-RESET = "\x1b[0m"
-BOLD = "\x1b[1m"
-DIM = "\x1b[2m"
-RED = "\x1b[31m"
-GREEN = "\x1b[32m"
-YELLOW = "\x1b[33m"
-GRAY = "\x1b[90m"
-
-CI_STYLE = {
-    "passing": (GREEN, "passing"),
-    "failing": (RED, "failing"),
-    "pending": (YELLOW, "pending"),
-    "none": (GRAY, "-"),
-    "error": (RED, "error"),
-}
-
-REVIEW_LABELS = {
-    "APPROVED": (GREEN, "approved"),
-    "CHANGES_REQUESTED": (RED, "changes"),
-    "REVIEW_REQUIRED": (YELLOW, "pending"),
-    None: (GRAY, "-"),
-}
-
-
-def load_list():
-    if not os.path.exists(LIST_FILE):
-        return []
-    with open(LIST_FILE) as f:
-        return [line.strip() for line in f if line.strip() and not line.startswith("#")]
-
-
-def save_list(refs):
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(LIST_FILE, "w") as f:
-        for ref in refs:
-            f.write(ref + "\n")
-
-
-def current_repo():
-    result = subprocess.run(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip()
-
-
-def normalize_ref(ref):
-    """Return (display_ref, gh_args) for a ref, resolving bare numbers."""
-    if ref.startswith("http://") or ref.startswith("https://"):
-        return ref, [ref]
-    if "#" in ref:
-        repo, _, num = ref.partition("#")
-        return f"{repo}#{num}", [num, "-R", repo]
-    if ref.isdigit():
-        repo = current_repo()
-        if not repo:
-            print(f"error: '{ref}' is a bare number but the current directory isn't a GitHub repo", file=sys.stderr)
-            sys.exit(1)
-        return f"{repo}#{ref}", [ref, "-R", repo]
-    print(f"error: unrecognized PR ref: {ref}", file=sys.stderr)
-    sys.exit(1)
-
-
-def rollup_status(checks):
-    if not checks:
-        return "none"
-    failing = False
-    pending = False
-    for c in checks:
-        status = c.get("status")
-        conclusion = c.get("conclusion")
-        state = c.get("state")
-        if status is not None:  # CheckRun
-            if status != "COMPLETED":
-                pending = True
-                continue
-            if conclusion in ("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"):
-                failing = True
-        elif state is not None:  # StatusContext
-            if state in ("FAILURE", "ERROR"):
-                failing = True
-            elif state in ("PENDING", "EXPECTED"):
-                pending = True
-    if failing:
-        return "failing"
-    if pending:
-        return "pending"
-    return "passing"
-
-
-def fetch_pr(ref):
-    display_ref, gh_args = normalize_ref(ref)
-    result = subprocess.run(
-        ["gh", "pr", "view", *gh_args, "--json", FIELDS],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        return {
-            "ref": display_ref,
-            "error": (result.stderr.strip() or "gh pr view failed").splitlines()[0],
-        }
-    data = json.loads(result.stdout)
-    data["ref"] = display_ref
-    data["ci"] = rollup_status(data.get("statusCheckRollup") or [])
-    return data
-
-
-def repo_from_url(url):
-    parts = url.split("/")
-    try:
-        idx = parts.index("github.com")
-        return f"{parts[idx + 1]}/{parts[idx + 2]}"
-    except (ValueError, IndexError):
-        return url
-
-
-def render(rows, interval, once):
-    width = get_terminal_size((100, 24)).columns
-    now = time.strftime("%H:%M:%S")
-    lines = []
-    lines.append(f"{BOLD}Watching {len(rows)} PR(s){RESET}  {DIM}updated {now}{RESET}")
-    lines.append("")
-
-    repo_w = 24
-    num_w = 7
-    ci_w = 9
-    review_w = 10
-    state_w = 8
-    title_w = max(20, width - repo_w - num_w - ci_w - review_w - state_w - 8)
-
-    header = f"{'REPO':<{repo_w}} {'#':<{num_w}} {'CI':<{ci_w}} {'REVIEW':<{review_w}} {'STATE':<{state_w}} TITLE"
-    lines.append(f"{DIM}{header}{RESET}")
-
-    for row in rows:
-        if "error" in row:
-            lines.append(f"{DIM}{row['ref']:<{repo_w + num_w + 1}}{RESET} {RED}{row['error'][:width - repo_w - num_w]}{RESET}")
-            continue
-
-        repo = repo_from_url(row["url"])
-        num = f"#{row['number']}"
-        ci_color, ci_label = CI_STYLE.get(row["ci"], CI_STYLE["error"])
-        review_color, review_label = REVIEW_LABELS.get(row.get("reviewDecision"), REVIEW_LABELS[None])
-
-        state = row["state"].lower()
-        if row.get("isDraft") and state == "open":
-            state = "draft"
-        state_color = {"open": GREEN, "draft": GRAY, "merged": BOLD, "closed": DIM}.get(state, "")
-
-        title = row["title"]
-        if len(title) > title_w:
-            title = title[: title_w - 1] + "…"
-
-        lines.append(
-            f"{repo:<{repo_w}} {num:<{num_w}} "
-            f"{ci_color}{ci_label:<{ci_w}}{RESET} "
-            f"{review_color}{review_label:<{review_w}}{RESET} "
-            f"{state_color}{state:<{state_w}}{RESET} "
-            f"{title}"
-        )
-        lines.append(f"{DIM}{'':<{repo_w + num_w + 1}}{row['url']}{RESET}")
-
-    if not once:
-        lines.append("")
-        lines.append(f"{DIM}refreshing every {interval}s -- ctrl-c to stop{RESET}")
-
-    print("\x1b[2J\x1b[H" + "\n".join(lines))
-
-
-def watch(refs, interval, once, as_json):
-    while True:
-        rows = [fetch_pr(ref) for ref in refs]
-        if as_json:
-            print(json.dumps(rows, indent=2))
-        else:
-            render(rows, interval, once)
-        if once:
-            return
-        try:
-            time.sleep(interval)
-        except KeyboardInterrupt:
-            return
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Lightweight PR monitor (gh CLI, no jq/gh-dash).")
-    parser.add_argument("refs", nargs="*", help="PR refs to watch (URL, owner/repo#123, or bare number)")
-    parser.add_argument("--add", nargs="+", metavar="REF", help="Add ref(s) to the persisted watch list")
-    parser.add_argument("--remove", nargs="+", metavar="REF", help="Remove ref(s) from the persisted watch list")
-    parser.add_argument("--list", action="store_true", help="Print the persisted watch list and exit")
-    parser.add_argument("--interval", type=int, default=30, help="Refresh interval in seconds (default: 30)")
-    parser.add_argument("--once", action="store_true", help="Render once and exit, no loop")
-    parser.add_argument("--json", action="store_true", help="Output raw JSON instead of a table")
-    args = parser.parse_args()
-
-    if args.add:
-        current = load_list()
-        for ref in args.add:
-            if ref not in current:
-                current.append(ref)
-        save_list(current)
-        print(f"Watch list ({len(current)}):")
-        for ref in current:
-            print(f"  {ref}")
-        return
-
-    if args.remove:
-        current = [r for r in load_list() if r not in args.remove]
-        save_list(current)
-        print(f"Watch list ({len(current)}):")
-        for ref in current:
-            print(f"  {ref}")
-        return
-
-    if args.list:
-        current = load_list()
-        if not current:
-            print("Watch list is empty. Add refs with: pr-watch --add <ref>")
-        else:
-            print(f"Watch list ({len(current)}):")
-            for ref in current:
-                print(f"  {ref}")
-        return
-
-    refs = args.refs or load_list()
-    if not refs:
-        print("No PRs to watch. Pass refs directly, or add some with: pr-watch --add <ref>", file=sys.stderr)
-        sys.exit(1)
-
-    watch(refs, args.interval, args.once, args.json)
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        pass
+exec "$BIN" "$@"

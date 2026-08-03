@@ -1,10 +1,10 @@
 /**
  * PR Watch -- keep an eye on a set of PRs without leaving the current tab.
  *
- * Opens `pr-watch` (common/github/bin/pr-watch) in a new pane split in the
- * current cmux workspace, instead of a new tab/workspace, since this is
- * meant to sit alongside whatever you're already doing. Lighter than
- * gh-dash: plain gh CLI + Python stdlib, no extra TUI framework.
+ * Opens `pr-watch` (Go + Bubble Tea; common/github/pr-watch, wrapper at
+ * common/github/bin/pr-watch) in a new pane split in the current cmux
+ * workspace, instead of a new tab/workspace, since this is meant to sit
+ * alongside whatever you're already doing.
  *
  * /prs [ref ...]         watch these PRs in a new split (not persisted)
  * /prs                   watch the persisted list in a new split
