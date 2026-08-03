@@ -30,11 +30,14 @@ pr-watch --interval 15    refresh interval in seconds (default 30)
 
 Keys: `↑/↓`/`j`/`k` move selection, `a` add, `d`/`x` remove selected, `r` retry
 failed CI for the selected PR (`gh run rerun --failed` on its failing runs),
-`f` retry + flag as a flake-check (once checks finish, labels the row
-**flaky?** if it now passes on the same commit, or **confirmed** if it's
-still failing), `o` open in browser, `q` quit. Repo/PR# and the PR link are
-clickable (OSC 8) in terminals that support it. Header shows how long ago
-the list last refreshed.
+`f` asks a fresh, tool-less `pi` session to look at the PR's diff and the
+failing check's logs (or its name/context if it's an external status check
+with no log, like a merge-stop bot) and judge whether the failure is
+**pr-caused**, **unrelated** (flaky/pre-existing/infra), or **unclear** --
+the same call you'd ask an agent to make manually, instead of empirically
+re-running CI to guess. `o` open in browser, `q` quit. `repo#123` is a single
+clickable (OSC 8) link, styled underlined since terminals don't style
+hyperlinks on their own. Header shows how long ago the list last refreshed.
 
 ### Headless (scripting / agent use)
 

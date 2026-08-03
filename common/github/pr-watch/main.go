@@ -5,7 +5,8 @@
 //
 // Interactive: pr-watch [ref ...] (persisted list if none given).
 // Keys: up/down/j/k move, a add, d/x remove, r retry failed CI,
-// f retry + flag as flake-check, o open in browser, q/ctrl+c quit.
+// f ask pi whether a failure looks caused by the PR or unrelated, o open in
+// browser, q/ctrl+c quit.
 //
 // Headless: pr-watch --add/--remove/--list manage the persisted list
 // (~/.config/pr-watch/list) without opening anything; --once/--json render
@@ -80,10 +81,13 @@ func saveList(refs []string) error {
 // ---------------------------------------------------------------------------
 
 type checkRun struct {
+	Name         string `json:"name"`
+	Context      string `json:"context"`
 	Status       string `json:"status"`
 	Conclusion   string `json:"conclusion"`
 	State        string `json:"state"`
 	DetailsURL   string `json:"detailsUrl"`
+	TargetURL    string `json:"targetUrl"`
 	WorkflowName string `json:"workflowName"`
 }
 
@@ -153,17 +157,23 @@ func rollupStatus(checks []checkRun) string {
 	return "passing"
 }
 
+var failConclusions = map[string]bool{
+	"FAILURE": true, "CANCELLED": true, "TIMED_OUT": true,
+	"ACTION_REQUIRED": true, "STARTUP_FAILURE": true,
+}
+
+// isFailedCheck reports whether a check (CheckRun or StatusContext) counts
+// as failed, regardless of which kind it is.
+func isFailedCheck(c checkRun) bool {
+	return (c.Status == "COMPLETED" && failConclusions[c.Conclusion]) ||
+		c.State == "FAILURE" || c.State == "ERROR"
+}
+
 func failedRunIDs(checks []checkRun) []string {
-	failConclusions := map[string]bool{
-		"FAILURE": true, "CANCELLED": true, "TIMED_OUT": true,
-		"ACTION_REQUIRED": true, "STARTUP_FAILURE": true,
-	}
 	seen := map[string]bool{}
 	var ids []string
 	for _, c := range checks {
-		isFailed := (c.Status == "COMPLETED" && failConclusions[c.Conclusion]) ||
-			(c.State == "FAILURE" || c.State == "ERROR")
-		if !isFailed {
+		if !isFailedCheck(c) {
 			continue
 		}
 		m := runIDPattern.FindStringSubmatch(c.DetailsURL)
@@ -202,17 +212,8 @@ func firstLine(s string) string {
 }
 
 // ---------------------------------------------------------------------------
-// Flake tracking
+// AI failure analysis (replaces rerun-based flake detection)
 // ---------------------------------------------------------------------------
-
-type flakeState int
-
-const (
-	flakeNone flakeState = iota
-	flakeChecking
-	flakeConfirmedFlake
-	flakeConfirmedFailure
-)
 
 type pr struct {
 	ref      string
@@ -221,9 +222,12 @@ type pr struct {
 	ci       string
 	errMsg   string
 	retrying bool
-	flake    flakeState
-	flakeSha string
-	lastSha  string
+
+	analyzing bool
+	aiVerdict string // "flaky", "pr-caused", "unrelated", "unclear"
+	aiReason  string
+	aiSha     string // commit sha the verdict was computed against
+	lastSha   string
 }
 
 func fetchOne(ref string) *pr {
@@ -262,6 +266,13 @@ type fetchedMsg struct{ prs []*pr }
 type retryDoneMsg struct {
 	ref string
 	err error
+}
+type analyzedMsg struct {
+	ref     string
+	verdict string
+	reason  string
+	sha     string
+	err     error
 }
 
 type model struct {
@@ -371,7 +382,7 @@ func (m *model) applyAction(action string) tea.Cmd {
 			_ = saveList(m.refs)
 			m.setStatus("removed " + ref)
 		}
-	case "retry", "flake":
+	case "retry":
 		if m.cursor >= len(m.prs) {
 			return nil
 		}
@@ -386,15 +397,20 @@ func (m *model) applyAction(action string) tea.Cmd {
 			return nil
 		}
 		p.retrying = true
-		if action == "flake" {
-			p.flake = flakeChecking
-			p.flakeSha = p.data.HeadRefOid
-			m.setStatus("re-running failed checks on " + p.ref + " to check for flakiness…")
-		} else {
-			p.flake = flakeNone
-			m.setStatus("re-running failed checks on " + p.ref + "…")
-		}
+		m.setStatus("re-running failed checks on " + p.ref + "…")
 		return retryCmd(p.ref, p.repo, ids)
+	case "analyze":
+		if m.cursor >= len(m.prs) {
+			return nil
+		}
+		p := m.prs[m.cursor]
+		if p.data == nil || p.ci != "failing" {
+			m.setStatus("no failing checks to analyze for " + p.ref)
+			return nil
+		}
+		p.analyzing = true
+		m.setStatus("asking pi whether " + p.ref + "'s failure looks related to the PR…")
+		return analyzeCmd(p)
 	case "open":
 		if m.cursor < len(m.prs) {
 			return openCmd(m.prs[m.cursor].ref)
@@ -458,7 +474,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			return m, m.applyAction("retry")
 		case "f":
-			return m, m.applyAction("flake")
+			return m, m.applyAction("analyze")
 		case "o":
 			return m, m.applyAction("open")
 		}
@@ -526,23 +542,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				sha = np.data.HeadRefOid
 			}
 			if old.lastSha != "" && sha != "" && sha != old.lastSha {
-				// New commit landed: any flake verdict is stale.
-				old.flake = flakeNone
-				old.retrying = false
-			} else if old.retrying && np.ci != "pending" {
-				if old.flake == flakeChecking {
-					if np.ci == "passing" && sha == old.flakeSha {
-						np.flake = flakeConfirmedFlake
-					} else {
-						np.flake = flakeConfirmedFailure
-					}
-				} else {
-					np.flake = old.flake
-				}
+				// New commit landed: any AI verdict about the old failure is stale.
+				np.aiVerdict = ""
+				np.aiReason = ""
+			} else {
+				np.aiVerdict = old.aiVerdict
+				np.aiReason = old.aiReason
+				np.aiSha = old.aiSha
+				np.analyzing = old.analyzing
+			}
+			if old.retrying && np.ci != "pending" {
 				np.retrying = false
 			} else {
-				np.flake = old.flake
-				np.flakeSha = old.flakeSha
 				np.retrying = old.retrying
 			}
 			np.lastSha = sha
@@ -561,6 +572,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus("retry triggered for " + msg.ref + ", waiting for checks…")
 		}
+		return m, nil
+
+	case analyzedMsg:
+		p := m.findPR(msg.ref)
+		if p != nil {
+			p.analyzing = false
+		}
+		if msg.err != nil {
+			m.setStatus("analysis failed for " + msg.ref + ": " + msg.err.Error())
+			return m, nil
+		}
+		if p != nil {
+			p.aiVerdict = msg.verdict
+			p.aiReason = msg.reason
+			p.aiSha = msg.sha
+		}
+		m.setStatus(msg.ref + ": " + msg.verdict + " -- " + msg.reason)
 		return m, nil
 	}
 	return m, nil
@@ -682,16 +710,23 @@ func ciBadge(p *pr) (string, int) {
 	}
 }
 
-func flakeBadge(p *pr) string {
-	switch p.flake {
-	case flakeChecking:
-		return fg(colorYellow, " (checking…)")
-	case flakeConfirmedFlake:
-		return fg(colorYellow, " (flaky?)")
-	case flakeConfirmedFailure:
-		return fg(colorRed, " (confirmed)")
+func aiBadge(p *pr) string {
+	if p.analyzing {
+		return fg(colorYellow, " (analyzing…)")
 	}
-	return ""
+	// A verdict computed against an older commit is stale; fetchedMsg clears
+	// it on a new sha, but guard here too in case of ordering surprises.
+	if p.aiVerdict == "" || (p.data != nil && p.aiSha != "" && p.aiSha != p.data.HeadRefOid) {
+		return ""
+	}
+	switch p.aiVerdict {
+	case "unrelated":
+		return fg(colorYellow, " (unrelated?)")
+	case "pr-caused":
+		return fg(colorRed, " (pr-caused)")
+	default:
+		return fg(colorGray, " (unclear)")
+	}
 }
 
 func reviewBadge(decision string) (string, int) {
@@ -735,7 +770,7 @@ var buttonDefs = []struct{ label, action string }{
 	{"a add", "add"},
 	{"d remove", "remove"},
 	{"r retry", "retry"},
-	{"f flake?", "flake"},
+	{"f explain", "analyze"},
 	{"o open", "open"},
 	{"q quit", "quit"},
 }
@@ -830,10 +865,11 @@ func (m model) View() string {
 			continue
 		}
 
-		prCell := hyperlink(linkStyle(padRight(p.ref, prW)), p.data.URL)
+		prLabel := fmt.Sprintf("%s#%d", p.repo, p.data.Number)
+		prCell := hyperlink(linkStyle(padRight(prLabel, prW)), p.data.URL)
 
 		ciText, ciColor := ciBadge(p)
-		ciCell := fg(ciColor, padRight(ciText, ciW)) + flakeBadge(p)
+		ciCell := fg(ciColor, padRight(ciText, ciW)) + aiBadge(p)
 		if p.retrying {
 			ciCell = fg(colorYellow, padRight("retrying…", ciW))
 		}
