@@ -36,7 +36,9 @@ the failing check's logs (or its name/context if it's an external status
 check with no log, like a merge-stop bot) and judge whether the failure is
 **pr-caused**, **unrelated** (flaky/pre-existing/infra), or **unclear** --
 the same call you'd ask an agent to make manually, instead of empirically
-re-running CI to guess. `o` open in browser, `q` quit. `repo#123` is a single
+re-running CI to guess. `o` opens the PR -- inside cmux, as a new browser
+tab in the current workspace (`cmux browser open`); otherwise the system
+default browser (`gh pr view --web`). `q` quit. `repo#123` is a single
 clickable (OSC 8) link, styled underlined since terminals don't style
 hyperlinks on their own. Header shows how long ago the list last refreshed.
 

@@ -495,9 +495,20 @@ func retryCmd(ref, repo string, runIDs []string) tea.Cmd {
 	}
 }
 
-func openCmd(ref string) tea.Cmd {
+// isCmux reports whether this process is running inside a cmux surface.
+func isCmux() bool {
+	return os.Getenv("CMUX_WORKSPACE_ID") != ""
+}
+
+func openCmd(url string) tea.Cmd {
 	return func() tea.Msg {
-		_ = exec.Command("gh", "pr", "view", ref, "--web").Start()
+		if isCmux() {
+			if err := exec.Command("cmux", "browser", "open", url, "--focus", "true").Run(); err == nil {
+				return nil
+			}
+			// fall through to gh if cmux's browser command failed for any reason
+		}
+		_ = exec.Command("gh", "pr", "view", url, "--web").Start()
 		return nil
 	}
 }
@@ -580,8 +591,8 @@ func (m *model) applyAction(action string) tea.Cmd {
 		m.setStatus("asking pi whether " + p.ref + "'s failure looks related to the PR…")
 		return analyzeCmd(p)
 	case "open":
-		if m.cursor < len(m.prs) {
-			return openCmd(m.prs[m.cursor].ref)
+		if m.cursor < len(m.prs) && m.prs[m.cursor].data != nil {
+			return openCmd(m.prs[m.cursor].data.URL)
 		}
 	}
 	return nil
