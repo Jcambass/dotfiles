@@ -1,0 +1,550 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["things.py"]
+# ///
+"""things: a plain CLI for Things 3, replicating hald/things-mcp's tool list.
+
+Read operations go through things.py (reads the local Things SQLite database
+directly). Write operations go through the Things URL scheme (or AppleScript
+for areas, which the URL scheme doesn't cover), executed the same
+foreground-safe way things-mcp's url_scheme.py does: via
+`osascript -e 'do shell script "open -g \"<url>\""'`.
+
+Run with `uv run macos/things3/bin/things <subcommand> ...` or directly once
+marked executable (`chmod +x`).
+"""
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import urllib.parse
+from typing import Any, Dict, List, Optional
+
+import things
+
+# --------------------------------------------------------------------------
+# Things URL scheme (ported from hald/things-mcp's url_scheme.py)
+# --------------------------------------------------------------------------
+
+
+def execute_url(url: str) -> None:
+    """Execute a Things URL without bringing Things to the foreground."""
+    try:
+        subprocess.run(
+            ["osascript", "-e", f'do shell script "open -g \\"{url}\\""'],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        # Fallback - still try with open -g directly.
+        subprocess.run(["open", "-g", url], check=True)
+
+
+def construct_url(command: str, params: Dict[str, Any]) -> str:
+    """Construct a Things URL from a command and its parameters."""
+    url = f"things:///{command}"
+
+    if command in ("update", "update-project"):
+        token = things.token()
+        if token:
+            params["auth-token"] = token
+        else:
+            print(
+                "warning: no Things URL scheme auth token found; update may be "
+                "rejected. Enable Things -> Settings -> General -> Enable Things URLs.",
+                file=sys.stderr,
+            )
+
+    if params:
+        encoded = []
+        for key, value in params.items():
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                value = str(value).lower()
+            elif isinstance(value, list):
+                value = ",".join(str(v) for v in value)
+            # safe='' so '/' inside values is percent-encoded; Things treats a
+            # literal '/' as a path delimiter and silently truncates.
+            encoded.append(f"{key}={urllib.parse.quote(str(value), safe='')}")
+        url += "?" + "&".join(encoded)
+
+    return url
+
+
+def add_todo_url(
+    title: str,
+    notes: Optional[str] = None,
+    when: Optional[str] = None,
+    deadline: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    checklist_items: Optional[List[str]] = None,
+    list_title: Optional[str] = None,
+    heading: Optional[str] = None,
+) -> str:
+    params = {
+        "title": title,
+        "notes": notes,
+        "when": when,
+        "deadline": deadline,
+        "checklist-items": "\n".join(checklist_items) if checklist_items else None,
+        "list": list_title,
+        "heading": heading,
+    }
+    if tags:
+        params["tags"] = ",".join(tags)
+    return construct_url("add", {k: v for k, v in params.items() if v is not None})
+
+
+def add_project_url(
+    title: str,
+    notes: Optional[str] = None,
+    when: Optional[str] = None,
+    deadline: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    area_title: Optional[str] = None,
+    todos: Optional[List[str]] = None,
+) -> str:
+    params = {
+        "title": title,
+        "notes": notes,
+        "when": when,
+        "deadline": deadline,
+        "area": area_title,
+        "to-dos": "\n".join(todos) if todos else None,
+    }
+    if tags:
+        params["tags"] = ",".join(tags)
+    return construct_url("add-project", {k: v for k, v in params.items() if v is not None})
+
+
+def update_todo_url(
+    uuid: str,
+    title: Optional[str] = None,
+    notes: Optional[str] = None,
+    when: Optional[str] = None,
+    deadline: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    add_tags: Optional[List[str]] = None,
+    completed: Optional[bool] = None,
+    canceled: Optional[bool] = None,
+    list_title: Optional[str] = None,
+    heading: Optional[str] = None,
+) -> str:
+    params = {
+        "id": uuid,
+        "title": title,
+        "notes": notes,
+        "when": when,
+        "deadline": deadline,
+        "tags": tags,
+        "add-tags": add_tags,
+        "completed": completed,
+        "canceled": canceled,
+        "list": list_title,
+        "heading": heading,
+    }
+    return construct_url("update", {k: v for k, v in params.items() if v is not None})
+
+
+def update_project_url(
+    uuid: str,
+    title: Optional[str] = None,
+    notes: Optional[str] = None,
+    when: Optional[str] = None,
+    deadline: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    completed: Optional[bool] = None,
+    canceled: Optional[bool] = None,
+) -> str:
+    params = {
+        "id": uuid,
+        "title": title,
+        "notes": notes,
+        "when": when,
+        "deadline": deadline,
+        "tags": tags,
+        "completed": completed,
+        "canceled": canceled,
+    }
+    return construct_url("update-project", {k: v for k, v in params.items() if v is not None})
+
+
+def show_url(uuid: str) -> str:
+    return construct_url("show", {"id": uuid})
+
+
+def _applescript_escape(s: str) -> str:
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def add_area_applescript(title: str) -> str:
+    """Create a new Area via AppleScript (no URL-scheme command exists).
+
+    Returns the new Area's UUID.
+    """
+    escaped = _applescript_escape(title)
+    script = (
+        'tell application "Things3"\n'
+        f'  set newArea to make new area with properties {{name:"{escaped}"}}\n'
+        "  return id of newArea\n"
+        "end tell"
+    )
+    result = subprocess.run(
+        ["osascript", "-e", script], check=True, capture_output=True, text=True
+    )
+    return result.stdout.strip()
+
+
+def update_area_applescript(
+    area_id: str, title: Optional[str] = None, tags: Optional[List[str]] = None
+) -> None:
+    """Update an existing Area via AppleScript (no URL-scheme command exists)."""
+    statements = []
+    if title is not None:
+        statements.append(f'set name of theArea to "{_applescript_escape(title)}"')
+    if tags is not None:
+        statements.append(
+            f'set tag names of theArea to "{_applescript_escape(",".join(tags))}"'
+        )
+    if not statements:
+        return
+
+    body = "\n  ".join(statements)
+    script = (
+        'tell application "Things3"\n'
+        f'  set theArea to area id "{_applescript_escape(area_id)}"\n'
+        f"  {body}\n"
+        "end tell"
+    )
+    subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+
+
+# --------------------------------------------------------------------------
+# Read-side helpers (things.py)
+# --------------------------------------------------------------------------
+
+_title_cache: Dict[str, Optional[str]] = {}
+
+
+def _resolve_title(uuid: Optional[str]) -> Optional[str]:
+    """Look up an item's title by uuid, caching results across a listing."""
+    if not uuid:
+        return None
+    if uuid not in _title_cache:
+        obj = things.get(uuid)
+        _title_cache[uuid] = obj["title"] if obj and obj.get("title") else None
+    return _title_cache[uuid]
+
+
+_STATUS_CHECKBOX = {"incomplete": "[ ]", "completed": "[x]", "canceled": "[-]"}
+
+
+def format_line(item: Dict[str, Any]) -> str:
+    """Render one item as a single human-readable line."""
+    item_type = item.get("type")
+    line = item["uuid"]
+
+    if item_type in ("to-do", "project", "heading"):
+        line += f"  {_STATUS_CHECKBOX.get(item.get('status'), '[ ]')}"
+
+    line += f"  {item.get('title', '')}"
+
+    extras = []
+    project_title = _resolve_title(item.get("project"))
+    if project_title:
+        extras.append(f"\u203a{project_title}")  # ›Project
+    area_title = _resolve_title(item.get("area"))
+    if area_title:
+        extras.append(f"@{area_title}")
+    if item.get("tags"):
+        extras.append("#" + ",".join(item["tags"]))
+    if item.get("deadline"):
+        extras.append(f"deadline:{item['deadline']}")
+    if item.get("start_date"):
+        extras.append(f"when:{item['start_date']}")
+    if item.get("stop_date"):
+        extras.append(f"completed:{item['stop_date']}")
+
+    if extras:
+        line += "  " + " ".join(extras)
+    return line
+
+
+def print_items(items: Any, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(items, indent=2, default=str))
+        return
+
+    items = items or []
+    if not items:
+        print("(no items)")
+        return
+    for item in items:
+        print(format_line(item))
+
+
+def parse_recent_period(period: str) -> str:
+    """Parse a period like '3d', '1w', '2m', '1y' into a things.py 'last' offset.
+
+    things.py's own offset format only understands d/w/y, so months are
+    converted to an approximate number of days (30 per month).
+    """
+    match = re.fullmatch(r"(\d+)([dwmy])", period)
+    if not match:
+        raise ValueError(
+            f"invalid period {period!r}; expected a number followed by d, w, m, or y "
+            "(e.g. 3d, 1w, 2m, 1y)"
+        )
+    count, unit = match.groups()
+    count = int(count)
+    if unit == "m":
+        return f"{count * 30}d"
+    return f"{count}{unit}"
+
+
+# --------------------------------------------------------------------------
+# Subcommand handlers
+# --------------------------------------------------------------------------
+
+
+def cmd_simple_list(name: str, args: argparse.Namespace) -> None:
+    items = getattr(things, name)()
+    print_items(items, args.json)
+
+
+def cmd_todos(args: argparse.Namespace) -> None:
+    items = things.todos(project=args.project)
+    print_items(items, args.json)
+
+
+def cmd_tagged(args: argparse.Namespace) -> None:
+    items = things.tasks(tag=args.tag)
+    print_items(items, args.json)
+
+
+def cmd_search(args: argparse.Namespace) -> None:
+    items = things.search(args.query)
+    print_items(items, args.json)
+
+
+def cmd_recent(args: argparse.Namespace) -> None:
+    offset = parse_recent_period(args.period)
+    items = things.last(offset)
+    print_items(items, args.json)
+
+
+def split_csv(value: Optional[str]) -> Optional[List[str]]:
+    if value is None:
+        return None
+    items = [v.strip() for v in value.split(",") if v.strip()]
+    return items or None
+
+
+def cmd_add_todo(args: argparse.Namespace) -> None:
+    url = add_todo_url(
+        title=args.title,
+        notes=args.notes,
+        when=args.when,
+        deadline=args.deadline,
+        tags=split_csv(args.tags),
+        checklist_items=split_csv(args.checklist),
+        list_title=args.list,
+        heading=args.heading,
+    )
+    execute_url(url)
+    print(f"Added todo: {args.title}")
+
+
+def cmd_add_project(args: argparse.Namespace) -> None:
+    url = add_project_url(
+        title=args.title,
+        notes=args.notes,
+        when=args.when,
+        deadline=args.deadline,
+        tags=split_csv(args.tags),
+        area_title=args.area,
+        todos=split_csv(args.todos),
+    )
+    execute_url(url)
+    print(f"Added project: {args.title}")
+
+
+def cmd_update_todo(args: argparse.Namespace) -> None:
+    url = update_todo_url(
+        uuid=args.uuid,
+        title=args.title,
+        notes=args.notes,
+        when=args.when,
+        deadline=args.deadline,
+        tags=split_csv(args.tags),
+        add_tags=split_csv(args.add_tags),
+        completed=True if args.completed else None,
+        canceled=True if args.canceled else None,
+        list_title=args.list,
+        heading=args.heading,
+    )
+    execute_url(url)
+    print(f"Updated todo: {args.uuid}")
+
+
+def cmd_update_project(args: argparse.Namespace) -> None:
+    url = update_project_url(
+        uuid=args.uuid,
+        title=args.title,
+        notes=args.notes,
+        when=args.when,
+        deadline=args.deadline,
+        tags=split_csv(args.tags),
+        completed=True if args.completed else None,
+        canceled=True if args.canceled else None,
+    )
+    execute_url(url)
+    print(f"Updated project: {args.uuid}")
+
+
+def cmd_add_area(args: argparse.Namespace) -> None:
+    uuid = add_area_applescript(args.title)
+    print(f"Added area: {args.title} ({uuid})")
+
+
+def cmd_update_area(args: argparse.Namespace) -> None:
+    update_area_applescript(args.uuid, title=args.title, tags=split_csv(args.tags))
+    print(f"Updated area: {args.uuid}")
+
+
+def cmd_show(args: argparse.Namespace) -> None:
+    execute_url(show_url(args.uuid))
+    print(f"Opened: {args.uuid}")
+
+
+# --------------------------------------------------------------------------
+# Argument parsing
+# --------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="things", description="A plain CLI for Things 3 (read via things.py, write via the URL scheme)."
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    read_parent = argparse.ArgumentParser(add_help=False)
+    read_parent.add_argument(
+        "--json", action="store_true", help="Print raw JSON instead of plain text"
+    )
+
+    simple_list_commands = {
+        "inbox": "List todos in the Inbox",
+        "today": "List today's todos",
+        "upcoming": "List upcoming todos",
+        "anytime": "List anytime todos",
+        "someday": "List someday todos",
+        "logbook": "List completed/canceled todos",
+        "trash": "List trashed todos",
+        "projects": "List projects",
+        "areas": "List areas",
+        "tags": "List tags",
+    }
+    for name, help_text in simple_list_commands.items():
+        sp = subparsers.add_parser(name, parents=[read_parent], help=help_text)
+        sp.set_defaults(func=lambda args, name=name: cmd_simple_list(name, args))
+
+    sp = subparsers.add_parser("todos", parents=[read_parent], help="List all todos")
+    sp.add_argument("--project", help="Filter by project UUID")
+    sp.set_defaults(func=cmd_todos)
+
+    sp = subparsers.add_parser("tagged", parents=[read_parent], help="List items with a specific tag")
+    sp.add_argument("tag", help="Tag name")
+    sp.set_defaults(func=cmd_tagged)
+
+    sp = subparsers.add_parser("search", parents=[read_parent], help="Search todos/projects/areas by title/notes")
+    sp.add_argument("query", help="Search text")
+    sp.set_defaults(func=cmd_search)
+
+    sp = subparsers.add_parser(
+        "recent", parents=[read_parent], help="List items created recently (e.g. 3d, 1w, 2m, 1y)"
+    )
+    sp.add_argument("period", help="Period like 3d, 1w, 2m, 1y")
+    sp.set_defaults(func=cmd_recent)
+
+    sp = subparsers.add_parser("add-todo", help="Create a new todo")
+    sp.add_argument("--title", required=True)
+    sp.add_argument("--notes")
+    sp.add_argument("--when", help="today, tomorrow, evening, anytime, someday, yyyy-mm-dd, or natural language")
+    sp.add_argument("--deadline", help="Deadline date (yyyy-mm-dd)")
+    sp.add_argument("--tags", help="Comma-separated tag names")
+    sp.add_argument("--checklist", help='Comma-separated checklist items, e.g. "item1,item2"')
+    sp.add_argument("--list", dest="list", help="Project or area title to add the todo to")
+    sp.add_argument("--heading", help="Heading title within the project")
+    sp.set_defaults(func=cmd_add_todo)
+
+    sp = subparsers.add_parser("add-project", help="Create a new project")
+    sp.add_argument("--title", required=True)
+    sp.add_argument("--notes")
+    sp.add_argument("--when")
+    sp.add_argument("--deadline", help="Deadline date (yyyy-mm-dd)")
+    sp.add_argument("--tags", help="Comma-separated tag names")
+    sp.add_argument("--area", help="Area title to add the project to")
+    sp.add_argument("--todos", help='Comma-separated todo titles to create in the project, e.g. "todo1,todo2"')
+    sp.set_defaults(func=cmd_add_project)
+
+    sp = subparsers.add_parser("update-todo", help="Update an existing todo")
+    sp.add_argument("uuid")
+    sp.add_argument("--title")
+    sp.add_argument("--notes")
+    sp.add_argument("--when")
+    sp.add_argument("--deadline")
+    sp.add_argument("--tags", help="Comma-separated tag names (replaces existing tags)")
+    sp.add_argument("--add-tags", help="Comma-separated tag names to add (keeps existing tags)")
+    sp.add_argument("--completed", action="store_true", help="Mark as completed")
+    sp.add_argument("--canceled", action="store_true", help="Mark as canceled")
+    sp.add_argument("--list", dest="list", help="Project or area title to move the todo to")
+    sp.add_argument("--heading", help="Heading title to move the todo under")
+    sp.set_defaults(func=cmd_update_todo)
+
+    sp = subparsers.add_parser("update-project", help="Update an existing project")
+    sp.add_argument("uuid")
+    sp.add_argument("--title")
+    sp.add_argument("--notes")
+    sp.add_argument("--when")
+    sp.add_argument("--deadline")
+    sp.add_argument("--tags", help="Comma-separated tag names (replaces existing tags)")
+    sp.add_argument("--completed", action="store_true", help="Mark as completed")
+    sp.add_argument("--canceled", action="store_true", help="Mark as canceled")
+    sp.set_defaults(func=cmd_update_project)
+
+    sp = subparsers.add_parser("add-area", help="Create a new area (via AppleScript)")
+    sp.add_argument("--title", required=True)
+    sp.set_defaults(func=cmd_add_area)
+
+    sp = subparsers.add_parser("update-area", help="Update an existing area (via AppleScript)")
+    sp.add_argument("uuid")
+    sp.add_argument("--title")
+    sp.add_argument("--tags", help="Comma-separated tag names to set")
+    sp.set_defaults(func=cmd_update_area)
+
+    sp = subparsers.add_parser("show", help="Open a specific item in Things")
+    sp.add_argument("uuid")
+    sp.set_defaults(func=cmd_show)
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    try:
+        args.func(args)
+    except Exception as exc:  # noqa: BLE001 - top-level CLI error boundary
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

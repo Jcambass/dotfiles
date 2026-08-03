@@ -51,6 +51,7 @@ if command -v brew >/dev/null 2>&1; then
   command -v opencode >/dev/null 2>&1 || missing_brews="$missing_brews opencode"
   command -v pup >/dev/null 2>&1 || missing_brews="$missing_brews pup"
   command -v hunk >/dev/null 2>&1 || missing_brews="$missing_brews hunk"
+  command -v uv >/dev/null 2>&1 || missing_brews="$missing_brews uv"
 
   if [ -n "$missing_brews" ]; then
     echo "  Installing agent toolchain with Homebrew."
