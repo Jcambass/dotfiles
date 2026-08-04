@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+#
+# external-repos-sync: opportunistically clone/update external git repos
+# listed in common/external-repos/repos.conf. See that file for the
+# manifest format and AGENTS.md's "External repo linking model" section
+# for the full design.
+#
+# Every repo is best-effort: a machine without access to a given repo (no
+# gh auth, no network, private/internal repo not visible to this account)
+# simply skips that line with an informational note -- never a warning,
+# never a failure. This script always exits 0; it must never be the
+# reason bootstrap fails. It also never blocks on a credential prompt --
+# an inaccessible repo must fail fast, not hang bootstrap waiting on input
+# that will never come.
+#
+# Each repo is always re-cloned fresh into a temp dir and swapped in,
+# rather than fast-forwarded in place: these are read-only mirrors, never
+# edited locally, and a squash/rebase/force-push upstream (the common case
+# for a repo that merges PRs) would otherwise permanently wedge a plain
+# `git pull --ff-only` -- it'd fail the same way, forever, every run.
+#
+# Usage:
+#   script/external-repos-sync            clone/update every configured repo
+#   script/external-repos-sync --status   report clone state only, no writes
+
+set -u
+
+cd "$(dirname "$0")/.." || exit 0
+root=$(pwd -P)
+manifest="$root/common/external-repos/repos.conf"
+dest_root="${XDG_DATA_HOME:-$HOME/.local/share}/dotfiles/external"
+
+# Never let git/gh prompt for credentials.
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND="ssh -oBatchMode=yes -oConnectTimeout=10"
+
+status_only=0
+[ "${1:-}" = "--status" ] && status_only=1
+
+timeout_bin=""
+if command -v timeout >/dev/null 2>&1; then
+  timeout_bin="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  timeout_bin="gtimeout"
+fi
+
+_run() {
+  if [ -n "$timeout_bin" ]; then
+    "$timeout_bin" 30 "$@"
+  else
+    "$@"
+  fi
+}
+
+_log()  { printf '  [ external-repos ] %s\n' "$*"; }
+_note() { printf '  [ external-repos ] note: %s\n' "$*"; }
+
+sync_one() {
+  local name="$1" repo="$2" kind="$3"
+  local dest="$dest_root/$name"
+
+  if [ "$status_only" -eq 1 ]; then
+    if [ -d "$dest/.git" ]; then
+      _log "$name: cloned at $dest"
+    else
+      _log "$name: not cloned (no access from this machine yet, or not synced)"
+    fi
+    return 0
+  fi
+
+  mkdir -p "$dest_root" 2>/dev/null || { _note "could not create $dest_root; skipping $name"; return 0; }
+
+  if [ -e "$dest" ] && [ ! -d "$dest/.git" ]; then
+    _note "$name: $dest exists but isn't a git checkout; skipping"
+    return 0
+  fi
+
+  local tmp="$dest.new.$$"
+  rm -rf "$tmp"
+  if command -v gh >/dev/null 2>&1; then
+    if ! _run gh repo clone "$repo" "$tmp" -- --depth 1 >/dev/null 2>&1; then
+      _note "$name: clone failed (no access from this machine, or repo not found); keeping existing local checkout if any"
+      rm -rf "$tmp"
+      return 0
+    fi
+  elif command -v git >/dev/null 2>&1; then
+    if ! _run git clone --depth 1 "https://github.com/$repo.git" "$tmp" >/dev/null 2>&1; then
+      _note "$name: clone failed (no access from this machine, or repo not found); keeping existing local checkout if any"
+      rm -rf "$tmp"
+      return 0
+    fi
+  else
+    _note "$name: neither gh nor git available; skipping"
+    return 0
+  fi
+
+  rm -rf "$dest"
+  mv "$tmp" "$dest"
+  _log "$name synced ($repo)"
+
+  case "$kind" in
+    gh-extension)
+      if ! command -v gh >/dev/null 2>&1; then
+        _note "$name: gh unavailable; cloned but not registered as an extension"
+        return 0
+      fi
+      _log "registering $name as a gh extension"
+      (cd "$dest" && gh extension install . --force >/dev/null 2>&1) \
+        || _note "$name: gh extension install failed; continuing"
+      ;;
+    *)
+      _note "$name: unknown kind '$kind'; cloned but no post-clone action taken"
+      ;;
+  esac
+}
+
+parse_manifest() {
+  [ -f "$manifest" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [ -z "$line" ] && continue
+    # shellcheck disable=SC2086
+    set -- $line
+    if [ "$#" -lt 3 ]; then
+      _note "skipping malformed manifest line: $line"
+      continue
+    fi
+    printf '%s\t%s\t%s\n' "$1" "$2" "$3"
+  done < "$manifest"
+}
+
+seen=""
+while IFS=$'\t' read -r name repo kind; do
+  [ -n "$name" ] || continue
+  case " $seen " in
+    *" $name "*) _note "duplicate manifest name '$name'; skipping repeat entry"; continue ;;
+  esac
+  seen="$seen $name"
+  sync_one "$name" "$repo" "$kind"
+done < <(parse_manifest)
+
+exit 0

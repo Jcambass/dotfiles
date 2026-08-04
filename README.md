@@ -65,6 +65,11 @@ pattern for pairing generic tracked code with a private/local companion
 file). Run `script/pi-agent-doctor` any time to check for drift between the
 repo and your live `~/.pi/agent`/`~/.agents`.
 
+External, mostly-private repos (e.g. one holding a shared `gh` CLI extension)
+are referenced the same opportunistic way, via
+`common/external-repos/repos.conf` and `script/external-repos-sync` -- see
+AGENTS.md's "External repo linking model" section.
+
 ## install
 
 Run this:

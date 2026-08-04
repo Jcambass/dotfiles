@@ -108,6 +108,65 @@ without explicit approval.
   that exist locally with no repo copy, inside the directories the repo
   actually tracks.
 
+## External repo linking model
+
+A paved path for referencing separate, mostly-private (or org-internal-
+visibility) GitHub repos that hold company/personal-specific tooling this
+repo can't hold itself, without ever committing that content here. First
+real case: a repo containing a shared `gh` CLI extension.
+
+- **Manifest**: `common/external-repos/repos.conf` (tracked, plain text --
+  `name repo kind` per line, format documented inline in the file). Repo
+  slugs and short names aren't secrets on their own (this repo already names
+  an external repo, `rneatherway/gh-slack`, in `common/agents/install.sh`
+  today) -- only a private repo's *contents* are sensitive, and those never
+  live here.
+- **Sync**: `script/external-repos-sync` clones/updates every entry into
+  `${XDG_DATA_HOME:-$HOME/.local/share}/dotfiles/external/<name>` -- outside
+  this repo's tree and outside `~/.pi/agent`/`~/.agents`, so
+  `script/pi-agent-doctor` never needs to know these paths exist (its whole
+  scope is real-file-vs-symlink drift for names *this repo* tracks; external
+  clones have no repo-side path to compare against and aren't symlinked from
+  here at all).
+- **Always fails silently, never hangs, never wedges**: a machine without
+  access to a given repo (no `gh auth`, no network, private/internal repo
+  invisible to this account) gets a one-line "note", never a warning or a
+  bootstrap failure. `GIT_TERMINAL_PROMPT=0` and batch-mode SSH are set
+  explicitly so an inaccessible private repo fails fast instead of hanging
+  bootstrap on a credential prompt that will never come. Every sync
+  re-clones fresh into a temp dir and swaps it in, rather than
+  fast-forwarding in place -- these are read-only mirrors, never edited
+  locally, and a squash/rebase/force-push upstream (the common case for a
+  repo that merges PRs) would otherwise permanently wedge a plain `git pull
+  --ff-only`: it'd fail the exact same way, forever, on every future run.
+- **Wired into bootstrap** via the `common/external-repos` topic's
+  `install.sh`, which always exits 0 itself regardless of what the sync
+  script encounters -- `script/bootstrap`'s install-script loop treats any
+  non-zero exit as fatal for the *whole run*, not just that topic, so this
+  wrapper's own exit code is load-bearing. Skip entirely with
+  `DOTFILES_SKIP_EXTERNAL_REPOS_SYNC=1` (or the existing global
+  `DOTFILES_SKIP_INSTALLS=1`).
+- **Listed on `macos` and `bpdev` only, deliberately not `codespaces`**:
+  Codespaces' default token is scoped to the creating repo and generally
+  can't reach arbitrary private/org-internal slugs, so every entry would
+  fail on every codespace, every rebuild -- pure recurring noise for zero
+  benefit, not the "silent and free" case the mechanism is designed for
+  elsewhere.
+- **Different from, and does not resurrect,** the `private/`-inside-the-repo
+  pattern tried in commit `8265de9` and reverted in `a84e7a6`: that was a
+  gitignored subtree of *this* repo that never synced anywhere on its own.
+  These are independent external git remotes, each syncing via their own
+  clone, stored entirely outside this repo's tree -- not even gitignored,
+  because nothing ever lands inside the repo to ignore.
+- **Adding a new repo** (the actual paved path): create/confirm the repo
+  exists on GitHub (private or internal visibility, your call per repo), add
+  one line to `repos.conf` (`name  owner/repo  gh-extension`), run
+  `script/external-repos-sync` or a full bootstrap. For `gh-extension`,
+  nothing else needs wiring up -- `gh <name>` works on any machine that can
+  clone it. Removing a line does not prune the on-disk clone; if that ever
+  matters, delete it manually from under `dotfiles/external/` in
+  `$XDG_DATA_HOME`/`~/.local/share`.
+
 ## Environment priorities
 
 - macOS and bp-dev are first-class environments.
