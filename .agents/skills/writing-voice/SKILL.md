@@ -58,6 +58,23 @@ If no profile is available, write in a direct, specific, confident-not-arrogant 
 - Cut filler before polishing.
 - Ask for missing names, numbers, dates, or links instead of inventing them.
 
+## PR descriptions
+
+Write PR descriptions as a clear technical narrative, not a completed-work checklist. Explain what the PR changes, why it matters, how its pieces fit together, and how it relates to the surrounding system or related work. Use enough structure and detail for reviewers to understand that wider picture:
+
+- Check for an applicable repository PR template before drafting. When one exists, use it as the starting structure and fit the content into it while following these rules. Preserve required sections and checklists; adapt or omit optional boilerplate that does not apply.
+- Explain why the change is needed before listing what changed.
+- Explain how the implementation works at the ownership boundaries reviewers need to evaluate.
+- Keep details that explain motivation, non-obvious behavior, or a real tradeoff. Do not inventory files, controls, or implementation details already clear from the diff.
+- Link the existing source, precedent, or follow-up where it supports a non-obvious claim. The prose must still make sense without opening the links.
+- Call out temporary compatibility code and name the intended replacement or follow-up.
+- Separate current behavior from future plans. Qualify proposed versioning, release, backport, or support policies unless the repository already implements and documents them.
+- Do not claim migration, upgrade preservation, or backward compatibility unless the feature has shipped state to preserve and the implementation and tests support the claim. Code on the PR base branch is not by itself evidence of deployed customer state.
+- Include personal design history only when it helps reviewers understand a decision or tradeoff.
+- Do not add a `Tests` section by default. Include validation details only when the user asks or when a non-obvious result materially helps reviewers evaluate risk.
+- Use headings to make that narrative easy to follow. Larger PRs often need several specific sections, and smaller PRs may too. Do not default to `Why` and `How` or force every PR into the same template.
+- Keep test results concise and secondary to the rationale and implementation.
+
 ## Rules
 
 1. **Curated profile first** — use `references/user-curated-voice.md` as the baseline; it is committed and always present.
