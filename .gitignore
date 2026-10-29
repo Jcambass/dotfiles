@@ -1,9 +1,2 @@
 git/gitconfig.local.symlink
 .system
-.pi/agent/auth.json
-.pi/agent/trust.json
-.pi/agent/sessions/
-.pi/agent/bin/
-.pi/agent/config/
-.pi/agent/gh/
-.pi/agent/extensions/status-dock/pi-status-dock

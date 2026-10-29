@@ -35,14 +35,11 @@ For multiple reviews, use distinct non-current model families when available. If
 
 Do not use this skill when the harness cannot launch child/subagent reviewers, when no reviewable input exists, or when the user only wants the current model's own review.
 
-## Pi adapter
+## Available reviewers
 
-Use the `subagent` tool with configured reviewer agents:
+Discover available reviewer agents and supported model routes through the current tool's native capabilities. Use only exposed agents and parameters; do not assume agent names or model overrides are available.
 
-- `second-opinion-opus` — latest available Opus model at max thinking (`xhigh`).
-- `second-opinion-gpt` — latest available GPT model at max thinking (`xhigh`).
-
-For multiple opinions, use `subagent` parallel mode (`tasks`) when possible. Give each task the same core review packet plus its reviewer label and focus.
+For multiple opinions, delegate in parallel when supported. Give each task the same core review packet plus its reviewer label and focus.
 
 ## Review packet
 

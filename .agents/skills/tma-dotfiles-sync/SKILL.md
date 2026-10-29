@@ -9,9 +9,9 @@ Use this skill when the user asks to check `tma/dotfiles`, compare against this
 repository, list new upstream changes, or selectively integrate changes from
 `https://github.com/tma/dotfiles`.
 
-This repository is intentionally a superset of `tma/dotfiles`. Keep the baseline
-close, but preserve local support for macOS, bp-dev, Codespaces, native Pi,
-cmux/tmux status panels, and local skills or agent configuration.
+This repository shares selected behavior with `tma/dotfiles`. Preserve local
+support for macOS, bp-dev, Codespaces,
+cmux/tmux, and shared skills or agent configuration.
 
 For the full workflow and commands, read
 `references/tma-dotfiles-sync-workflow.md`.
@@ -45,7 +45,6 @@ For the full workflow and commands, read
 - Check `git status` before editing and do not touch unrelated local changes.
 - Do not replace local files wholesale when they contain local-only behavior.
 - Do not remove bp-dev or Codespaces support just because upstream lacks it.
-- Do not reintroduce the old macOS Pi wrapper unless the user explicitly asks.
 - Do not add private hostnames, credentials, machine names, or internal runbooks.
 - Keep examples generic unless the value is already public in this repository.
 - Do not port upstream owner-specific identity changes directly: keep local

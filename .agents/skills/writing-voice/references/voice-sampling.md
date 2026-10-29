@@ -99,7 +99,7 @@ Do not show the user the voice analysis unless they ask. Just use it when writin
 Cache sampled profiles so they persist across sessions. Sampled profiles only: never the curated profile, never raw samples.
 
 ```bash
-PROFILE="$HOME/.pi/voice-profiles/${USERNAME}.md"
+PROFILE="$HOME/.cache/writing-voice/${USERNAME}.md"
 mkdir -p "$(dirname "$PROFILE")"
 [ -f "$PROFILE" ] && cat "$PROFILE"
 # Otherwise write it with a `# Generated: YYYY-MM-DD` header.

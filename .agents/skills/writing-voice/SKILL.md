@@ -21,7 +21,7 @@ Before drafting, read:
 
 ### When to sample (rare)
 
-Do **not** read `references/voice-sampling.md` by default. The curated profile is committed to this skill and already exists — treat it as always present. A missing sampled/cached profile in `$HOME/.pi/voice-profiles/` is, by itself, never a reason to sample.
+Do **not** read `references/voice-sampling.md` by default. The curated profile is committed to this skill and already exists — treat it as always present. A missing sampled/cached profile in `$HOME/.cache/writing-voice/` is, by itself, never a reason to sample.
 
 Only read `voice-sampling.md` when at least one of these is explicitly true:
 
@@ -41,7 +41,7 @@ Keep the curated profile style-only: no raw samples, internal links, teammate na
 
 1. Load the curated profile first.
 2. Load the style rules.
-3. Do not sample by default (see "When to sample (rare)" above). Only load `$HOME/.pi/voice-profiles/` notes or run `references/voice-sampling.md` when one of those explicit triggers applies.
+3. Do not sample by default (see "When to sample (rare)" above). Only load `$HOME/.cache/writing-voice/` notes or run `references/voice-sampling.md` when one of those explicit triggers applies.
 4. Draft the text.
 5. Edit once for voice: direct, plainspoken, specific, and appropriate to the venue.
 6. Edit once for AI tells: kill-list words, filler, em-dash overuse, dramatic fragments, and generic conclusions.
@@ -84,7 +84,7 @@ Write PR descriptions as a clear technical narrative, not a completed-work check
 5. **Kill-list words are absolute** — replace them even if the user uses them.
 6. **Style beats voice for bad patterns** — copy good habits, not AI-sounding ones.
 7. **Specifics beat polish** — when in doubt, make it shorter and more concrete.
-8. **Keep profiles separate** — curated profile in the skill folder; sampled profiles in `~/.pi/voice-profiles`; refresh sampled profiles quarterly.
+8. **Keep profiles separate** — curated profile in the skill folder; sampled profiles in `~/.cache/writing-voice`; refresh sampled profiles quarterly.
 
 ## Final edit checklist
 

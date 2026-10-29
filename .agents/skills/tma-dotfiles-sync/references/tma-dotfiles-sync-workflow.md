@@ -72,10 +72,8 @@ list, then fall back to the no-shared-history tree comparison only for files or
 layout changes that need local/manual mapping.
 
 At this checkpoint, the code-review PR-linked issue updates were selected for
-manual porting. This repository now runs Pi natively on macOS, bp-dev, and
-Codespaces. Do not bring back the old macOS Pi wrapper unless the user asks.
-Preserve local-only additions such as `@microsoft/workiq`,
-`set-clipboard`, cmux/tmux status panel behavior, and bp-dev native Pi notes.
+manual porting. Preserve local-only additions such as `@microsoft/workiq`,
+`set-clipboard`, and cmux/tmux support across the supported environments.
 
 ## Inspect candidate files
 
@@ -96,7 +94,7 @@ git show refs/remotes/tma-dotfiles/main:.agents/skills/<skill>/SKILL.md
 For directories:
 
 ```sh
-git ls-tree -r --name-only refs/remotes/tma-dotfiles/main -- .agents .config .pi
+git ls-tree -r --name-only refs/remotes/tma-dotfiles/main -- .agents .config
 ```
 
 Upstream currently uses a flatter layout with root dotfiles (`.bashrc`,
@@ -111,7 +109,7 @@ Useful upstream-to-local path mappings to inspect manually:
 - `.gitconfig` -> `common/git/gitconfig.symlink`
 - `.gitignore` -> `.gitignore` and `common/git/gitignore.symlink`
 - `.tmux.conf` -> `common/tmux/tmux.conf.symlink`
-- `.shellrc` -> `common/agents/pi.sh` plus shell integration files
+- `.shellrc` -> `common/agents/agent.env` and shell integration files
 - `.zshrc` -> `common/zsh/zshrc.symlink` and `common/zsh/config.zsh`
 - `.bashrc` -> `common/bash/bashrc.symlink`
 - `.config/opencode/opencode.json` -> `common/agents/opencode.json`
@@ -128,7 +126,6 @@ behavior.
 Group upstream changes into choices that can be integrated independently:
 
 - agent instructions and skills
-- Pi configuration
 - tmux or terminal configuration
 - shell or bootstrap behavior
 - application configuration
@@ -155,9 +152,8 @@ Use manual patches for local superset files. Preserve:
 - root `AGENTS.md` public-repository baseline plus local dotfiles rules
 - macOS and bp-dev as first-class environments
 - Codespaces support
-- native Pi on macOS, bp-dev, and Codespaces
-- cmux and tmux status panel support
-- `.agents` and `.pi/agent` as managed dotfiles components
+- cmux and tmux support
+- `.agents` as a managed dotfiles component
 - non-interactive bootstrap behavior
 - local `jcambass/` branch-prefix rules and user-facing wording
 - `writing-voice/references/user-curated-voice.md` as the local curated profile
@@ -177,8 +173,8 @@ upstream changes into the same commit.
 Run the focused checks from root `AGENTS.md`:
 
 ```sh
-bash -n script/bootstrap script/common-link common/agents/install.sh common/agents/pi.sh common/apps/install.sh
-zsh -n common/zsh/zshenv.symlink common/zsh/zshrc.symlink common/zsh/config.zsh common/agents/pi.zsh
+bash -n script/bootstrap script/common-link script/agent-doctor common/agents/install.sh common/apps/install.sh
+zsh -n common/zsh/zshenv.symlink common/zsh/zshrc.symlink common/zsh/config.zsh
 python3 -m json.tool common/agents/opencode.json >/dev/null
 ```
 

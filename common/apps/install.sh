@@ -156,7 +156,6 @@ _apps_main() {
 
   if [ "$system" = "macos" ]; then
     _apps_link_file "$root/common/apps/config/ghostty/config" "$HOME/.config/ghostty/config" || failures=$((failures + 1))
-    _apps_link_file "$root/common/apps/config/cmux/dock.json" "$HOME/.config/cmux/dock.json" || failures=$((failures + 1))
     _apps_enable_cmux_beta_features
   fi
 

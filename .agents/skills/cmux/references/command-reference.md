@@ -104,9 +104,9 @@ Status pills, progress bars, and log entries appear in the cmux sidebar.
 
 ```bash
 # Status pills: key-value with icon and color
-cmux set-status pi "working" --icon terminal.fill --color "#ff9500"
+cmux set-status agent "working" --icon terminal.fill --color "#ff9500"
 cmux set-status tasks "3/5" --icon checklist --color "#007aff"
-cmux clear-status pi
+cmux clear-status agent
 cmux list-status
 
 # Progress bar, 0.0 to 1.0
@@ -114,11 +114,11 @@ cmux set-progress 0.5 --label "Building..."
 cmux clear-progress
 
 # Log entries
-cmux log --level info --source pi -- "Started build"
-cmux log --level success --source pi -- "Build complete"
-cmux log --level error --source pi -- "Build failed"
-cmux log --level warning --source pi -- "Deprecated API"
-cmux log --level progress --source pi -- "Compiling..."
+cmux log --level info --source agent -- "Started build"
+cmux log --level success --source agent -- "Build complete"
+cmux log --level error --source agent -- "Build failed"
+cmux log --level warning --source agent -- "Deprecated API"
+cmux log --level progress --source agent -- "Compiling..."
 cmux clear-log
 cmux list-log --limit 20
 

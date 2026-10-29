@@ -57,7 +57,7 @@ gh-slack read --details <slack-permalink> > /tmp/slack-thread.md
 
 ## Authentication and secrets
 
-`gh-slack` uses Slack cookie auth for the team in the permalink. If auth is missing or expired, report the error and ask the user to refresh Slack auth locally. Pi runs natively on macOS, so use the host `gh-slack` command directly instead of looking for container mounts or forwarded cookies.
+`gh-slack` uses Slack cookie auth for the team in the permalink. If auth is missing or expired, report the error and ask the user to refresh Slack auth locally. Use `gh-slack` where local authentication is configured; do not look for container mounts or forward cookies.
 
 The command below prints secrets that can impersonate the user:
 

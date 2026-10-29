@@ -47,20 +47,15 @@ When a single message clearly bundles multiple unrelated tasks (different repos/
 - Lightweight option: a fresh session with no project ceremony, for anything that doesn't need a local checkout at all — including tasks that reference a repo by name only, like monitoring a PR's CI via `gh --repo owner/repo` (`gh` doesn't need a checkout).
 - Heavier option: a session scoped to its own checkout/worktree and branch, for real ongoing work inside a specific repo.
 
-This repo's pi setup and this guidance are meant to be cross-tool (confirmed: a Copilot CLI session auto-loads this file and this repo's `.agents/skills/`), but the concrete commands below are pi-only:
-
-- **Under pi**, with the workstreams/quick-chat extensions available (`/qc` and `/ws` show up as commands): use `/qc [task]` for the lightweight option and `/ws new [task]` for the heavier one.
-- **Under any other tool** (e.g. GitHub Copilot CLI) where those commands don't exist: use that tool's own equivalent instead of referencing a command that isn't there. For Copilot CLI, that means starting a new `copilot` session yourself in the right directory (`copilot --cloud` for a fully isolated one) — there's no built-in equivalent to `/ws`'s automatic worktree+tab creation, so say plainly that's what you're doing instead of assuming one exists.
-
 ## Waiting on slow external processes (CI, deploys, builds)
 
-There is no background execution after I finish a reply — nothing happens until you prompt me again. Never say "I'll check back shortly" (or similar) and then just stop; that implies a follow-up that will not happen on its own.
+Only promise ongoing monitoring or a callback when an actual background task or automation is running and can provide updates. Otherwise, do not imply that work will continue after the reply.
 
-Instead:
+When no such background task or automation is running:
 
-- Poll for it in the same turn: run a bounded loop (bash `sleep` between checks, e.g. `gh pr checks` / `gh run watch`) with a sane retry count or timeout, and report the final result once it resolves or the timeout is hit.
-- `gh run watch` and `gh pr checks --watch` already block and poll natively — prefer those over hand-rolled loops when available.
-- If it would realistically take too long for one turn (long deploys, multi-hour jobs), say so plainly and ask me to check back or re-prompt — do not imply I'll follow up on my own.
+- Poll in the same turn with a bounded retry count or timeout, and report the result when it resolves or the time limit is reached.
+- Prefer native polling such as `gh run watch` or `gh pr checks --watch` over hand-written loops when available, with a timeout.
+- If the time limit is reached or the process would take too long for one turn, report that it is still pending and explain that another prompt is needed to continue.
 
 ## Writing on my behalf
 

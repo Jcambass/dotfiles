@@ -1,7 +1,6 @@
-# tmux settings for Pi and other modern TUIs.
+# tmux settings for modern TUIs.
 #
-# Pi relies on extended key reporting so modified Enter and similar keys survive
-# the trip through tmux.
+# Preserve modified Enter and similar keys through tmux.
 set -g extended-keys on
 set -g extended-keys-format csi-u
 
@@ -16,11 +15,10 @@ set -ga terminal-overrides ',*:Tc'
 set -g mouse on
 set -g history-limit 100000
 
-# Let TUIs such as Pi use OSC 52 clipboard writes through tmux for commands
-# like `/copy`.
+# Let TUIs use OSC 52 clipboard writes through tmux.
 set -g set-clipboard on
 
-# Keep tmux out of the way visually when Pi is using it as a wrapper.
+# Keep tmux out of the way visually when running terminal applications.
 set -g pane-border-status off
 set -g pane-border-lines spaces
 set -g pane-border-style 'default'
@@ -37,7 +35,7 @@ set -g window-status-separator ""
 set -gw automatic-rename on
 set -gw automatic-rename-format '#{b:pane_current_path}'
 set -g set-titles on
-set -g set-titles-string '#{b:pane_current_path} - #{session_name}#{?@pi_session_name, - #{@pi_session_name},}'
+set -g set-titles-string '#{b:pane_current_path} - #{session_name}'
 
 set -g status-style 'bg=#2e3440,fg=#d8dee9'
 set -g status-left '#[fg=#eceff4,bg=#3b4252,bold] #S #[bg=#2e3440] '

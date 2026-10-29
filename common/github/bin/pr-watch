@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
-# Build/cache and run the Bubble Tea pr-watch TUI. Same build-cache pattern
-# as .pi/agent/extensions/status-dock.sh, but this is its own tool, not part
-# of the status dock.
+# Build/cache and run the Bubble Tea pr-watch TUI.
 
 set -euo pipefail
 
 SCRIPT_PATH="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd -P)"
 SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)/pr-watch"
-CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/pi"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/pr-watch"
 BIN="$CACHE_DIR/pr-watch"
 STAMP="$CACHE_DIR/pr-watch.stamp"
 

@@ -58,14 +58,14 @@ Focus:
 
 For a single review, use the opposite family when the current/root family is known:
 
-| Current/root model family | Reviewer route | Pi subagent |
-|---------------------------|----------------|-------------|
-| GPT/OpenAI | Latest Opus | `second-opinion-opus` |
-| Opus/Anthropic | Latest GPT | `second-opinion-gpt` |
+| Current/root model family | Reviewer route |
+|---------------------------|----------------|
+| GPT/OpenAI | Latest Opus |
+| Opus/Anthropic | Latest GPT |
 
 For multiple reviews:
 
-1. If invoked by the `code-review` skill for a deep/thorough review, always include both `second-opinion-gpt` and `second-opinion-opus` when available, even if one matches the current/root model family.
+1. If invoked by the `code-review` skill for a deep/thorough review, always include both GPT and Opus reviewer routes when available, even if one matches the current/root model family.
 2. Otherwise, prefer distinct non-current reviewer routes.
 3. If only one non-current route is configured, reuse that route with separate tasks and different reviewer focuses.
 4. If the user explicitly requests a current-family reviewer, ask for confirmation unless their wording already makes the override clear.
@@ -107,7 +107,7 @@ Include relevant project guidance when present:
 - `.github/instructions/*.instructions.md` that apply to touched files
 - `CONVENTIONS.md`
 
-Also include review rubric/checklist content when available, such as `.pi/agent/prompts/review.md`, `.pi/prompts/review.md`, or equivalent. Extract only advisory review parts: checklist, severities, output format, and project-specific review standards. Exclude posting, editing, or PR workflow steps.
+Also include review rubric/checklist content from the project's review guidance when available. Extract only advisory review parts: checklist, severities, output format, and project-specific review standards. Exclude posting, editing, or PR workflow steps.
 
 Do not over-collect. Include enough context for independent reasoning without flooding reviewers with unrelated files.
 
@@ -155,25 +155,9 @@ For multiple reviewers, keep the shared packet identical and vary only reviewer 
 
 ## Delegation
 
-### Pi
+Use the current tool's native child-agent/subagent mechanism. Discover available reviewers and supported model-selection parameters before delegation; do not assume configured agent names or tool signatures.
 
-Use the Pi `subagent` tool.
-
-Single review:
-
-- Current/root GPT/OpenAI → `agent: "second-opinion-opus"`.
-- Current/root Opus/Anthropic → `agent: "second-opinion-gpt"`.
-- Deep/thorough code-review workflow → include both `agent: "second-opinion-gpt"` and `agent: "second-opinion-opus"`.
-
-Multiple reviews:
-
-- Prefer one `subagent` call with `tasks: [...]` for parallel delegation.
-- Set each task's `agent`, `task`, and `cwd` when reviewing a local repository.
-- If parallel delegation is unavailable, run reviewers sequentially.
-
-### Other harnesses
-
-Use equivalent child-agent invocations with explicit model routes/overrides. Preserve the same task payload and output requirements.
+Select the chosen reviewer family only through supported options and follow the current tool's instructions for model overrides. Preserve the same task payload and output requirements. Delegate multiple reviews in parallel when supported; otherwise run them sequentially.
 
 ## Presenting results
 

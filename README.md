@@ -56,14 +56,11 @@ System-specific topics live under their system directory, like
 `macos/homebrew` or `bpdev/vscode-extensions`. Shared topics live under
 `common/`.
 
-`.pi/agent` and `.agents` are the one exception to the component conventions
-above: instead of `*.symlink` files, `common/agents/install.sh` symlinks them
-file-by-file from the repo into `~/.pi/agent` and `~/.agents`. See
-`AGENTS.md`'s "Pi agent linking model" section for the rules (what's
-local-only, why whole-directory symlinking isn't used, and the one safe
-pattern for pairing generic tracked code with a private/local companion
-file). Run `script/pi-agent-doctor` any time to check for drift between the
-repo and your live `~/.pi/agent`/`~/.agents`.
+`.agents` is the exception to the component conventions above:
+`common/agents/install.sh` links it into `~/.agents`, using per-file links when
+that destination already exists as a real directory. See `AGENTS.md`'s "Shared
+agent linking model" section for the rules.
+Run `script/agent-doctor` to check for drift in the managed shared configuration.
 
 External, mostly-private repos (e.g. one holding a shared `gh` CLI extension)
 are referenced the same opportunistic way, via
@@ -100,13 +97,12 @@ script/bootstrap --backup
 macOS, bpdev, and Codespaces also link the shared agent configuration:
 
 - `~/.agents` for global agent instructions and skills.
-- `~/.pi/agent` for Pi agents, prompts, settings, and extensions.
 - `~/.config/opencode/opencode.json` for OpenCode defaults.
-- `~/.local/bin` as the npm prefix for Pi installs.
+- `~/.local` as the npm prefix for tools such as WorkIQ.
 
-`.agents` and `.pi/agent` are managed by the `common/agents` component like any
-other dotfiles component; they just link into nested config paths instead of
-directly into `$HOME`.
+`.agents` is managed by the `common/agents` component like any other dotfiles
+component; it links into a nested configuration path instead of directly into
+`$HOME`.
 
 Shared application configs live in `common/apps`. Bootstrap links htop and
 RubyGems config on every supported environment, and links Ghostty config only on
@@ -115,76 +111,21 @@ macOS because bpdev and Codespaces do not run the host terminal app.
 macOS, bpdev, and Codespaces are all first-class agent environments. Bootstrap
 installs the core agent toolchain automatically with Homebrew on macOS and
 `sudo apt-get` on bpdev/Codespaces: `git`, `gh`, `jq`, `ripgrep`, `tmux`,
-Node.js/npm, Pi, OpenCode, WorkIQ, and `pup`. macOS also installs Bash, cmux,
+Node.js/npm, OpenCode, WorkIQ, and `pup`. macOS also installs Bash, cmux,
 and Ghostty when they are missing.
 
-Pi runs natively in every supported environment. On macOS, run Pi in cmux when
-you want the cmux sidebar, the built-in Feed, and the custom Pi Dock status
-view. Outside cmux, the `pi` shell function starts or attaches a small tmux
-session for interactive Pi when `tmux` is available. Short-lived commands such
-as `pi --list-models` run directly so they remain easy to pipe or script.
-
-macOS bootstrap enables cmux's built-in Feed and Dock beta features. The managed
-Dock keeps a `Pi` status control for Session, Plan, Goal, Tasks, and Git. The
-built-in Feed is separate from Dock; open it with `cmux right-sidebar set feed`
-or the right-sidebar Feed tab. Bootstrap installs the Pi cmux hook when `cmux`
-and `pi` are available, which lets Pi telemetry and session data show up in
-Feed. According to cmux's hook documentation, Pi currently sends
-`tool_execution_start` and `tool_execution_end` telemetry and supports session
-restore there; it is not a replacement for Pi's own approval UI.
+macOS bootstrap enables cmux's built-in Feed and Dock beta features. Open Feed
+with `cmux right-sidebar set feed` or the right-sidebar Feed tab.
 
 To connect every supported agent CLI to Feed, run `cmux hooks setup --yes`
-manually. Bootstrap only installs the Pi hook by default because all-agent setup
-updates other agent configurations. `cmux feed clear` resets local Feed history
-and is not part of setup.
-
-The managed Pi configuration is linked into `~/.pi/agent`, so changes to agents,
-prompts, settings, skills, and extensions are local files. Use Pi's `/reload`
-command after changing extensions instead of rebuilding an image or restarting a
-container.
+manually. Bootstrap does not change individual agent hook configurations.
+`cmux feed clear` resets local Feed history and is not part of setup.
 
 The `common/notes` component provides the `note` CLI, spelling-tool setup, and
-Pi note-taking resources for a private Markdown notes repo at `$NOTES_ROOT`
+shared note-taking resources for a private Markdown notes repo at `$NOTES_ROOT`
 (default: `~/Notes`). The notes repo uses numbered PARA folders (`10 - Projects`,
 `20 - Areas`, `30 - Resources`, `40 - Archive`) with meeting notes under
 `30 - Resources/Meetings`. There is intentionally no inbox.
-
-## Projects and Workstreams
-
-A **Project** is a parent repository or context, identified by its git remote
-origin URL or real path. A **Workstream** is a focused task context inside a
-Project: an isolated git branch and checkout, a dedicated Pi conversation, and
-an optional cmux workspace.
-
-Use `/ws` for both Project selection and Workstream management. If you run
-it inside a Project, it opens that Project's Workstreams and includes a
-`Switch Project…` option. If you run it outside a Project, it asks which
-Project to open.
-
-| Command | What it does |
-|---|---|
-| `/ws` | Pick, open, or remove a Workstream, with Project selection when needed. |
-| `/ws new [task]` | Create a new Workstream in the current Project, or choose a Project. |
-| `/ws end` | Remove the current linked Workstream and end the Pi conversation. |
-| `/ws fork [name]` | Copy current WIP into a new independent Workstream without touching the source. |
-
-`/ws fork` carries over uncommitted tracked changes and untracked files, so you
-can start a new branch from the exact state of your current checkout. The source
-branch is not modified.
-
-The old `/projects` and `/worktree` commands were intentionally removed.
-Projects are still part of the model, but `/ws` is the only command surface.
-
-Pi is configured to use GitHub Copilot models by default. The first time you run
-it, authenticate Pi itself:
-
-```text
-/login
-```
-
-Choose GitHub Copilot and leave the Enterprise domain blank unless you need one.
-Pi stores auth in `~/.pi/agent/auth.json`. If Pi says `No API key found for
-github-copilot`, run `/login`.
 
 The main file you'll want to change right off the bat is `zsh/zshrc.symlink`,
 which sets up a few paths that'll be different on your particular machine.

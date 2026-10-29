@@ -522,14 +522,7 @@ _agents_safe_link() {
   ln -s "$src" "$dest" && _agents_log "linked $dest -> $src"
 }
 
-# Symlinks every file under src_dir into dest_dir, recursing into real
-# directories. Deliberately has no path exclusion logic: the paths that
-# must never be symlinked (auth.json, trust.json, sessions/, bin/, config/,
-# gh/) simply never exist in the repo's tracked .pi/agent tree, so this
-# loop never encounters them in normal operation. Keeping those paths out
-# of the repo's git status is .gitignore's job — plain git hygiene, already
-# effective on its own, needing no separate enforcement here. See
-# AGENTS.md's "Pi agent linking model" section.
+# Link shared configuration file-by-file when the destination is a real directory.
 _agents_link_tree() {
   local src_dir="$1" dest_dir="$2"
   local item name
@@ -562,42 +555,11 @@ _agents_link_global_agents() {
   fi
 }
 
-_agents_link_pi_agent() {
-  local root="$1" src="$root/.pi/agent" dest="$HOME/.pi/agent"
-  local old_skills_target agents_md state_path
-
-  [ -d "$src" ] || return 0
-  mkdir -p "$dest" || return 1
-
-  for state_path in auth.json trust.json sessions bin config gh; do
-    if [ -L "$dest/$state_path" ]; then
-      rm "$dest/$state_path" && _agents_log "removed managed state link $dest/$state_path"
-    fi
-  done
-
-  if [ -L "$dest/skills" ]; then
-    old_skills_target="$(readlink "$dest/skills" 2>/dev/null || true)"
-    case "$old_skills_target" in
-      "$root/.pi/agent/skills"|"$root/.agents/skills")
-        rm "$dest/skills" && _agents_log "removed stale $dest/skills"
-        ;;
-    esac
-  fi
-
-  _agents_link_tree "$src" "$dest"
-
-  agents_md="$root/.agents/AGENTS.md"
-  if [ -f "$agents_md" ]; then
-    _agents_safe_link "$agents_md" "$dest/AGENTS.md"
-  fi
-}
-
 # Remove any symlink under $dest_dir whose target used to point into the
 # dotfiles repo ($repo_root) but no longer exists there. Safe by
 # construction: only ever touches symlinks (never real files), and only
 # ones this repo's own install.sh created (target path is under
-# $repo_root). Covers every subdirectory generically — no per-filename
-# list to maintain (see AGENTS.md's "Pi agent linking model" section).
+# $repo_root). Covers every subdirectory without a per-filename list.
 _agents_prune_dangling_links() {
   local dest_dir="$1" repo_root="$2"
   local link target
@@ -638,80 +600,13 @@ _agents_ensure_node() {
   fi
 
   if ! command -v curl >/dev/null 2>&1 || ! _agents_can_apt; then
-    _agents_warn "npm is unavailable and curl/sudo/apt-get are not all present; skipping Pi install"
+    _agents_warn "npm is unavailable and curl/sudo/apt-get are not all present; skipping npm-based agent tools"
     return 1
   fi
 
   _agents_log "installing Node.js LTS"
   curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - \
     && sudo apt-get install -y nodejs
-}
-
-_agents_install_or_update_pi() {
-  local npm_prefix="${NPM_CONFIG_PREFIX:-$HOME/.local}"
-
-  if [ -n "${DOTFILES_SKIP_AGENT_INSTALL:-}" ]; then
-    _agents_log "skipping Pi install because DOTFILES_SKIP_AGENT_INSTALL is set"
-    return 0
-  fi
-
-  if ! _agents_is_agent_host; then
-    if command -v pi >/dev/null 2>&1; then
-      _agents_log "pi already available outside managed agent hosts; leaving it untouched"
-    else
-      _agents_log "skipping Pi install outside managed agent hosts"
-    fi
-    return 0
-  fi
-
-  if ! command -v npm >/dev/null 2>&1 && ! _agents_ensure_node; then
-    return 0
-  fi
-
-  mkdir -p "$npm_prefix/bin" "$npm_prefix/lib" || {
-    _agents_warn "failed to prepare npm prefix $npm_prefix; skipping Pi install"
-    return 0
-  }
-
-  if command -v pi >/dev/null 2>&1; then
-    _agents_log "updating Pi"
-  else
-    _agents_log "installing Pi"
-  fi
-
-  NPM_CONFIG_PREFIX="$npm_prefix" npm install -g @earendil-works/pi-coding-agent \
-    || _agents_warn "Pi install failed; continuing"
-}
-
-_agents_setup_cmux_pi_hooks() {
-  if ! _agents_is_macos; then
-    return 0
-  fi
-
-  if [ -n "${DOTFILES_SKIP_CMUX_HOOKS:-}" ]; then
-    _agents_log "skipping cmux Pi hook setup because DOTFILES_SKIP_CMUX_HOOKS is set"
-    return 0
-  fi
-
-  if ! command -v cmux >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if ! command -v pi >/dev/null 2>&1; then
-    return 0
-  fi
-
-  _agents_log "setting up cmux Pi hooks"
-  if cmux hooks setup --agent pi --yes >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if cmux hooks pi install --yes >/dev/null 2>&1; then
-    return 0
-  fi
-
-  _agents_warn "cmux Pi hook setup failed; continuing"
-  return 0
 }
 
 _agents_install_or_update_workiq() {
@@ -779,15 +674,18 @@ _agents_install_or_update_opencode() {
     || _agents_warn "OpenCode install failed; continuing"
 }
 
-_agents_check_pi_agent_drift() {
-  local root="$1" doctor="$root/script/pi-agent-doctor" summary
+_agents_check_agent_drift() {
+  local root="$1" doctor="$root/script/agent-doctor" summary
 
   [ -x "$doctor" ] || return 0
 
-  summary="$("$doctor" --summary 2>/dev/null)" || return 0
+  summary="$("$doctor" --summary)" || {
+    _agents_warn "could not audit shared agent configuration"
+    return 0
+  }
 
   if printf '%s\n' "$summary" | grep -Ev ': 0 drift, 0 untracked' | grep -q .; then
-    _agents_warn "drift found under \$HOME/.pi/agent or \$HOME/.agents -- run script/pi-agent-doctor for details"
+    _agents_warn "drift found under \$HOME/.agents -- run script/agent-doctor for details"
   fi
 }
 
@@ -796,16 +694,12 @@ _agents_main() {
   root="$(_agents_root)"
 
   _agents_link_global_agents "$root" || failures=$((failures + 1))
-  _agents_link_pi_agent "$root" || failures=$((failures + 1))
   _agents_prune_dangling_links "$HOME/.agents" "$root" || failures=$((failures + 1))
-  _agents_prune_dangling_links "$HOME/.pi/agent" "$root" || failures=$((failures + 1))
-  _agents_check_pi_agent_drift "$root"
+  _agents_check_agent_drift "$root"
   _agents_link_opencode_config "$root" || failures=$((failures + 1))
   _agents_ensure_agent_tools || failures=$((failures + 1))
   _agents_ensure_gh_slack || failures=$((failures + 1))
   _agents_install_or_update_opencode || failures=$((failures + 1))
-  _agents_install_or_update_pi || failures=$((failures + 1))
-  _agents_setup_cmux_pi_hooks || failures=$((failures + 1))
   _agents_install_or_update_workiq || failures=$((failures + 1))
 
   if [ "$failures" -gt 0 ]; then

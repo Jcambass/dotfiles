@@ -5,8 +5,7 @@
 //
 // Interactive: pr-watch [ref ...] (persisted list if none given).
 // Keys: up/down/j/k move, a add, d/x remove, r retry failed CI,
-// f ask pi whether a failure looks caused by the PR or unrelated, o open in
-// browser, q/ctrl+c quit.
+// o open in browser, q/ctrl+c quit.
 //
 // Headless: pr-watch --add/--remove/--list manage the persisted list
 // (~/.config/pr-watch/list) without opening anything; --once/--json render
@@ -30,7 +29,7 @@ import (
 
 const (
 	defaultInterval = 30 * time.Second
-	ghFields        = "number,title,url,state,isDraft,reviewDecision,headRefOid,statusCheckRollup"
+	ghFields        = "number,title,url,state,isDraft,reviewDecision,statusCheckRollup"
 )
 
 var runIDPattern = regexp.MustCompile(`/runs/(\d+)`)
@@ -98,7 +97,6 @@ type ghPR struct {
 	State          string     `json:"state"`
 	IsDraft        bool       `json:"isDraft"`
 	ReviewDecision string     `json:"reviewDecision"`
-	HeadRefOid     string     `json:"headRefOid"`
 	Checks         []checkRun `json:"statusCheckRollup"`
 }
 
@@ -371,23 +369,17 @@ func firstLine(s string) string {
 }
 
 // ---------------------------------------------------------------------------
-// AI failure analysis (replaces rerun-based flake detection)
+// PR state
 // ---------------------------------------------------------------------------
 
 type pr struct {
 	ref      string
 	repo     string
 	data     *ghPR
-	ci       string // coarse passing/failing/pending/none -- used for retry/analyze gating and JSON
+	ci       string // coarse passing/failing/pending/none -- used for retry gating and JSON
 	checks   []checkDetail
 	errMsg   string
 	retrying bool
-
-	analyzing bool
-	aiVerdict string // "pr-caused", "unrelated", "unclear"
-	aiReason  string
-	aiSha     string // commit sha the verdict was computed against
-	lastSha   string
 }
 
 func fetchOne(ref string) *pr {
@@ -428,13 +420,6 @@ type fetchedMsg struct{ prs []*pr }
 type retryDoneMsg struct {
 	ref string
 	err error
-}
-type analyzedMsg struct {
-	ref     string
-	verdict string
-	reason  string
-	sha     string
-	err     error
 }
 
 type model struct {
@@ -518,15 +503,6 @@ func (m *model) setStatus(s string) {
 	m.statusUntil = time.Now().Add(6 * time.Second)
 }
 
-func (m *model) findPR(ref string) *pr {
-	for _, p := range m.prs {
-		if p.ref == ref {
-			return p
-		}
-	}
-	return nil
-}
-
 // applyAction runs one named action against the model. Shared by keyboard
 // shortcuts and clickable footer buttons so both paths behave identically.
 func (m *model) applyAction(action string) tea.Cmd {
@@ -578,18 +554,6 @@ func (m *model) applyAction(action string) tea.Cmd {
 		p.retrying = true
 		m.setStatus("re-running failed checks on " + p.ref + "…")
 		return retryCmd(p.ref, p.repo, ids)
-	case "analyze":
-		if m.cursor >= len(m.prs) {
-			return nil
-		}
-		p := m.prs[m.cursor]
-		if p.data == nil || p.ci != "failing" {
-			m.setStatus("no failing checks to analyze for " + p.ref)
-			return nil
-		}
-		p.analyzing = true
-		m.setStatus("asking pi whether " + p.ref + "'s failure looks related to the PR…")
-		return analyzeCmd(p)
 	case "open":
 		if m.cursor < len(m.prs) && m.prs[m.cursor].data != nil {
 			return openCmd(m.prs[m.cursor].data.URL)
@@ -653,8 +617,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.applyAction("remove")
 		case "r":
 			return m, m.applyAction("retry")
-		case "f":
-			return m, m.applyAction("analyze")
 		case "o":
 			return m, m.applyAction("open")
 		}
@@ -717,26 +679,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				kept = append(kept, np)
 				continue
 			}
-			sha := ""
-			if np.data != nil {
-				sha = np.data.HeadRefOid
-			}
-			if old.lastSha != "" && sha != "" && sha != old.lastSha {
-				// New commit landed: any AI verdict about the old failure is stale.
-				np.aiVerdict = ""
-				np.aiReason = ""
-			} else {
-				np.aiVerdict = old.aiVerdict
-				np.aiReason = old.aiReason
-				np.aiSha = old.aiSha
-				np.analyzing = old.analyzing
-			}
 			if old.retrying && np.ci != "pending" {
 				np.retrying = false
 			} else {
 				np.retrying = old.retrying
 			}
-			np.lastSha = sha
 			kept = append(kept, np)
 		}
 		m.prs = kept
@@ -752,23 +699,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus("retry triggered for " + msg.ref + ", waiting for checks…")
 		}
-		return m, nil
-
-	case analyzedMsg:
-		p := m.findPR(msg.ref)
-		if p != nil {
-			p.analyzing = false
-		}
-		if msg.err != nil {
-			m.setStatus("analysis failed for " + msg.ref + ": " + msg.err.Error())
-			return m, nil
-		}
-		if p != nil {
-			p.aiVerdict = msg.verdict
-			p.aiReason = msg.reason
-			p.aiSha = msg.sha
-		}
-		m.setStatus(msg.ref + ": " + msg.verdict + " -- " + msg.reason)
 		return m, nil
 	}
 	return m, nil
@@ -917,7 +847,6 @@ var buttonDefs = []struct{ label, action string }{
 	{"a add", "add"},
 	{"d remove", "remove"},
 	{"r retry", "retry"},
-	{"f explain", "analyze"},
 	{"o open", "open"},
 	{"q quit", "quit"},
 }
@@ -982,10 +911,6 @@ func selectedPR(m model) *pr {
 	return m.prs[m.cursor]
 }
 
-func aiStale(p *pr) bool {
-	return p.data != nil && p.aiSha != "" && p.aiSha != p.data.HeadRefOid
-}
-
 var checkActionLabel = map[checkAction]string{
 	actionRetry:    "retry-ready",
 	actionWait:     "waiting -- run still in progress",
@@ -993,8 +918,7 @@ var checkActionLabel = map[checkAction]string{
 }
 
 // renderDetail is the full breakdown for the selected PR: CI checks grouped
-// by required/optional with per-check rerun status, and the persisted AI
-// verdict/reason (not just a transient status line).
+// by required/optional with per-check rerun status.
 func renderDetail(p *pr, width int) []string {
 	if p == nil {
 		return nil
@@ -1065,23 +989,6 @@ func renderDetail(p *pr, width int) []string {
 			break
 		}
 		lines = append(lines, l)
-	}
-
-	switch {
-	case p.analyzing:
-		lines = append(lines, fg(colorYellow, "AI: analyzing…"))
-	case p.aiVerdict != "" && !aiStale(p):
-		verdictColor := colorGray
-		switch p.aiVerdict {
-		case "pr-caused":
-			verdictColor = colorRed
-		case "unrelated":
-			verdictColor = colorYellow
-		}
-		lines = append(lines, "AI: "+fg(verdictColor, p.aiVerdict))
-		lines = append(lines, "  "+dimText(truncate(p.aiReason, max(width-2, 10))))
-	case failing > 0:
-		lines = append(lines, dimText("AI: press 'f' to ask whether this failure looks related to the PR"))
 	}
 
 	return lines
@@ -1248,8 +1155,6 @@ type jsonRow struct {
 	CI             string      `json:"ci,omitempty"`
 	TableCI        string      `json:"tableCi,omitempty"` // ok/req/opt, see tableCI()
 	Checks         []jsonCheck `json:"checks,omitempty"`
-	AIVerdict      string      `json:"aiVerdict,omitempty"`
-	AIReason       string      `json:"aiReason,omitempty"`
 	Error          string      `json:"error,omitempty"`
 }
 
@@ -1323,10 +1228,6 @@ func printJSON(prs []*pr) {
 					Name: c.Name, Workflow: c.Workflow, URL: c.URL,
 					Required: c.Required, Action: string(c.Action),
 				})
-			}
-			if p.aiVerdict != "" && !aiStale(p) {
-				row.AIVerdict = p.aiVerdict
-				row.AIReason = p.aiReason
 			}
 		}
 		rows = append(rows, row)

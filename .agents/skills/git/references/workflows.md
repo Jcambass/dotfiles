@@ -84,11 +84,11 @@ Optional body for complex changes:
 Good:
 
 ```text
-add PID scoping to status files to prevent multi-session collisions
+scope temporary files by process ID to avoid concurrent writes
 
-Multiple pi sessions in the same directory were overwriting each
-other's stats and todos files. Scope filenames by process.pid and
-pass PI_PID environment variable to the status panel shell script.
+Concurrent commands were overwriting each other's intermediate output.
+Use a unique temporary file per process so one run cannot replace
+another run's results.
 ```
 
 Bad:
