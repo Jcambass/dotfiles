@@ -72,6 +72,7 @@ Write PR descriptions as a clear technical narrative, not a completed-work check
 - Do not claim migration, upgrade preservation, or backward compatibility unless the feature has shipped state to preserve and the implementation and tests support the claim. Code on the PR base branch is not by itself evidence of deployed customer state.
 - Include personal design history only when it helps reviewers understand a decision or tradeoff.
 - Do not add a `Tests` section by default. Include validation details only when the user asks or when a non-obvious result materially helps reviewers evaluate risk.
+- Omit routine test/assertion counts, lint/syntax/whitespace success logs, discovery-case inventories, and unavailable-environment execution logs unless explicitly requested or required by the repository. Explain behavior and design rationale instead; state material risks or limitations when they affect the review, without adding a generic `Testing` section.
 - Use headings to make that narrative easy to follow. Larger PRs often need several specific sections, and smaller PRs may too. Do not default to `Why` and `How` or force every PR into the same template.
 - Keep test results concise and secondary to the rationale and implementation.
 
